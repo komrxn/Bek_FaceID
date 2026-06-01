@@ -1,17 +1,22 @@
 /**
- * Kiosk page — dark, hospitality-grade calm.
+ * Kiosk page — dark, hospitality-grade.
  *
- * Left ~58 % camera stage. Right ~42 % scene-driven panel: idle hero, faint
- * recognition outline (debouncing), full recognition card with Пришёл/Ушёл,
- * success ripple, or error banner.
+ * Layout principles:
+ *   - Single flex column anchored to viewport (`100dvh`) — never overflows,
+ *     no `position: absolute` over content. Footer is in flow, last child.
+ *   - On narrow / portrait the camera takes a *flexible* height (not a
+ *     fixed aspect-ratio that would push the rest off-screen) and the
+ *     scene panel stacks below it.
+ *   - At ≥xl (1280px landscape) the camera and scene panel sit side by
+ *     side at 3:2 — gives a calm, hospitality-grade composition.
+ *   - All paddings use viewport-aware safe areas (`env(safe-area-inset-*)`).
  *
- * The page is "dumb" — it dispatches FSM actions in response to user taps and
- * /api/recognize responses; it doesn't decide what to show beyond reading
- * `state.name` and rendering the matching scene.
+ * Visual reference: Linear's status pages, Apple's "Hello" registration
+ * screen, Vercel deploy dashboards.
  */
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { useCamera } from "@/hooks/useCamera";
@@ -30,49 +35,9 @@ import { api, ApiError } from "@/lib/api";
 import { attendanceMarkResponseSchema } from "@/lib/zod";
 import { spring } from "@/lib/motion";
 
-function DebugOverlay({
-  state,
-  cameraStatus,
-  online,
-}: {
-  state: string;
-  cameraStatus: string;
-  online: boolean;
-}) {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((t) => t + 1), 250);
-    return () => window.clearInterval(id);
-  }, []);
-  const stats = window.__bekStats__;
-  void tick; // re-render every 250ms to refresh stats
-  return (
-    <div className="fixed top-4 left-4 z-50 max-w-md px-3 py-2 rounded-xl bg-black/80 text-white text-xs font-mono leading-snug pointer-events-none">
-      <div>state: <b>{state}</b></div>
-      <div>camera: <b>{cameraStatus}</b></div>
-      <div>online: <b>{String(online)}</b></div>
-      {stats && (
-        <>
-          <div className="mt-1 pt-1 border-t border-white/20">
-            sent: <b>{stats.sent}</b> · recv: <b>{stats.received}</b> · err: <b>{stats.errors}</b>
-          </div>
-          <div>
-            last: <b>{stats.lastStatus}</b> sim=<b>{stats.lastSim.toFixed(3)}</b>
-          </div>
-          <div>
-            can_mark=<b>{String(stats.lastCanMark)}</b> emp=<b>{stats.lastEmployee ?? "—"}</b>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 const SUCCESS_LINGER_MS = 1600;
 const ERROR_LINGER_MS = 6000;
 const KIOSK_BUTTON_TIMEOUT_MS = 10_000;
-// Если в режиме сканирования нет лица столько подряд — авто-выход в idle
-// (камера выключается; следующий раз только по кнопке).
 const NO_FACE_IDLE_MS = 5000;
 
 export default function Kiosk() {
@@ -84,43 +49,24 @@ export default function Kiosk() {
 
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  // Включаем подробные console logs если в URL `?debug=1`. Удобно когда
-  // подключаешь iPad-Safari к Mac через Web Inspector.
   const debugMode = typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("debug") === "1";
-  useEffect(() => {
-    window.__BEK_DEBUG__ = debugMode;
-  }, [debugMode]);
+  useEffect(() => { window.__BEK_DEBUG__ = debugMode; }, [debugMode]);
 
-  // Камера живёт ТОЛЬКО когда нужна — не в idle. Это снимает запись
-  // прохожих случайно мимо двери и экономит CPU.
   const cameraActive = state.name !== "idle";
   const { videoRef, status: cameraStatus, error: cameraError, captureJpeg } =
     useCamera(cameraActive);
   const [online, setOnline] = useState(true);
 
-  useRecognition({
-    stateName: state.name,
-    captureJpeg,
-    dispatch,
-  });
+  useRecognition({ stateName: state.name, captureJpeg, dispatch });
 
-  // Таймер «нет лица 5 сек подряд» — пасует scanning обратно в idle (камера off).
+  // Timer: "no face for 5s" → idle (camera off).
   const lastFaceSeenRef = useRef<number>(Date.now());
   useEffect(() => {
-    // Сбрасываем «таймер последнего лица» каждый раз когда входим в активные состояния.
     if (state.name === "scanning" || state.name === "detected_pending_liveness") {
       lastFaceSeenRef.current = Date.now();
     }
   }, [state.name]);
-  // Любой FRAME_RESULT с лицом обновляет timestamp; не-видение лица не обновляет.
-  // Мы оборачиваем dispatch через ref-aware версию ниже — но проще:
-  // useRecognition уже вызывает dispatch напрямую; нам нужен side-channel.
-  // Решение: смотрим на смену state.name. Когда reducer переключается из
-  // recognized_real / detected_pending_liveness обратно в scanning — лицо
-  // было, обновляем. А вот «scanning остался scanning» — может быть и
-  // лицо есть (unknown), и нет (no_face). Для простоты — обновляем при
-  // любом не-idle изменении.
   useEffect(() => {
     if (state.name !== "scanning" && state.name !== "detected_pending_liveness") return;
     const id = window.setInterval(() => {
@@ -133,20 +79,13 @@ export default function Kiosk() {
 
   // Tap → mark.
   const markMutation = useMutation({
-    mutationFn: async ({
-      token,
-      eventType,
-    }: {
-      token: string;
-      eventType: "came" | "went";
-    }) => {
-      return api({
+    mutationFn: async ({ token, eventType }: { token: string; eventType: "came" | "went" }) =>
+      api({
         method: "POST",
         path: "/api/attendance/mark",
         body: { pending_event_token: token, event_type: eventType },
         schema: attendanceMarkResponseSchema,
-      });
-    },
+      }),
     onSuccess: (data) => {
       setOnline(true);
       dispatch({ type: "MARK_SUCCESS", eventType: data.event_type });
@@ -155,23 +94,17 @@ export default function Kiosk() {
       if (err instanceof ApiError && err.status >= 500) setOnline(false);
       else setOnline(true);
 
-      // 409 = «уже отмечено в течение 5 минут». Это не ошибка, а защита
-      // от случайного двойного нажатия — показываем спокойное уведомление,
-      // а не страшное «обратитесь к управляющему».
       if (err instanceof ApiError && err.status === 409) {
         const detail = (err.body as { detail?: { msg?: string } } | undefined)?.detail;
         const msg = detail?.msg ?? "";
-        // backend returns "Уже отмечено: «came» в 15:45." — выдёргиваем время.
         const m = msg.match(/(\d{1,2}:\d{2})/);
-        const whenLabel = m ? `в ${m[1]}` : "недавно";
         dispatch({
           type: "MARK_DUPLICATE",
           eventType: variables.eventType,
-          whenLabel,
+          whenLabel: m ? `в ${m[1]}` : "недавно",
         });
         return;
       }
-
       dispatch({ type: "MARK_ERROR" });
     },
   });
@@ -185,7 +118,7 @@ export default function Kiosk() {
     [state, markMutation]
   );
 
-  // Timers that drive state.name === sticky → idle.
+  // Sticky-state timers.
   useEffect(() => {
     let id: number | undefined;
     if (state.name === "marked_success") {
@@ -197,12 +130,10 @@ export default function Kiosk() {
     } else if (state.name === "recognized_real") {
       id = window.setTimeout(() => dispatch({ type: "TIMEOUT" }), KIOSK_BUTTON_TIMEOUT_MS);
     }
-    return () => {
-      if (id) window.clearTimeout(id);
-    };
+    return () => { if (id) window.clearTimeout(id); };
   }, [state.name]);
 
-  // Online detection — flips false if recognize() throws beyond an HTTP code.
+  // Online detection.
   useEffect(() => {
     const onOnline = () => setOnline(true);
     const onOffline = () => setOnline(false);
@@ -216,43 +147,54 @@ export default function Kiosk() {
 
   const cameraReady = cameraStatus === "ready";
   const scanCaption =
-    state.name === "scanning" ||
-    state.name === "detected_pending_liveness"
+    state.name === "scanning" || state.name === "detected_pending_liveness"
       ? "Распознаю…"
       : undefined;
 
   return (
-    <main className="relative w-full h-full overflow-hidden bg-bek-darkBg text-bek-darkText">
+    <main
+      className="relative flex flex-col w-full bg-bek-darkBg text-bek-darkText overflow-hidden"
+      style={{ minHeight: "100dvh", height: "100dvh" }}
+    >
       <AmbientBackground />
 
-      {/* Top-right chrome — clock + date */}
-      <div className="absolute top-8 right-12 z-20 flex flex-col items-end gap-1">
+      {/* Top chrome — sits in flow, never overlaps content. */}
+      <header
+        className="relative z-20 flex items-center justify-end px-5 sm:px-8 lg:px-12 pt-4 sm:pt-6"
+        style={{ paddingTop: "max(env(safe-area-inset-top), 1rem)" }}
+      >
         <Clock />
-      </div>
+      </header>
 
-      {/* Main grid: 58/42 split on landscape, stacked on portrait */}
-      <div className="relative z-10 w-full h-full grid grid-cols-1 xl:grid-cols-[58fr_42fr] gap-4 sm:gap-6 p-4 sm:p-8 lg:p-12 pb-24">
-        {/* Camera stage (or denied-fallback) */}
-        <div className="relative">
+      {/* Main area: stretches between header and footer.
+          Stack at <lg (phones, small tablets in portrait), side-by-side at ≥lg. */}
+      <div
+        className="relative z-10 flex-1 min-h-0 grid gap-4 sm:gap-6 lg:gap-8
+                   px-4 sm:px-6 lg:px-10
+                   grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,1fr)]
+                   grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-rows-1"
+      >
+        {/* Camera stage */}
+        <section className="relative min-h-0 flex items-center justify-center">
           {cameraStatus === "denied" || cameraStatus === "error" ? (
-            <div className="w-full h-full flex flex-col items-center justify-center text-center gap-4 text-bek-darkTextMuted">
-              <div className="text-display-md text-bek-darkText">
+            <div className="w-full max-w-md flex flex-col items-center justify-center text-center gap-3 text-bek-darkTextMuted px-4">
+              <div className="text-display-sm sm:text-display-md text-bek-darkText">
                 Камера недоступна
               </div>
-              <p className="text-body-md max-w-md">
-                {cameraError ?? "Разрешите доступ к камере в настройках браузера и обновите страницу."}
+              <p className="text-body-sm sm:text-body-md">
+                {cameraError ?? "Разрешите доступ к камере и обновите страницу."}
               </p>
             </div>
           ) : (
             <CameraStage videoRef={videoRef} active={cameraReady} caption={scanCaption} />
           )}
-        </div>
+        </section>
 
-        {/* Scene panel — driven by FSM state.name */}
-        <div className="relative flex items-center justify-center">
+        {/* Scene panel */}
+        <section className="relative min-h-0 flex items-center justify-center">
           <AnimatePresence mode="wait">
             {state.name === "idle" && (
-              <motion.div key="idle" exit={{ opacity: 0 }} transition={spring.calm}>
+              <motion.div key="idle" exit={{ opacity: 0 }} transition={spring.calm} className="w-full">
                 <IdlePrompt onStart={() => dispatch({ type: "START_SCAN" })} />
               </motion.div>
             )}
@@ -264,13 +206,13 @@ export default function Kiosk() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.24 }}
-                className="flex flex-col items-center gap-6 text-center"
+                className="flex flex-col items-center gap-4 sm:gap-6 text-center px-4"
               >
-                <Loader2 className="h-10 w-10 text-bek-indigo animate-spin" />
-                <div className="text-display-md text-bek-darkText">
+                <Loader2 className="h-8 w-8 sm:h-10 sm:w-10 text-bek-indigo animate-spin" />
+                <div className="text-display-sm sm:text-display-md text-bek-darkText">
                   Подождите, распознаю…
                 </div>
-                <div className="text-body-md text-bek-darkTextMuted max-w-sm">
+                <div className="text-body-sm sm:text-body-md text-bek-darkTextMuted max-w-xs sm:max-w-sm">
                   Смотрите прямо в камеру и держите голову неподвижно секунду.
                 </div>
               </motion.div>
@@ -283,12 +225,11 @@ export default function Kiosk() {
                 animate={{ opacity: 0.85, scale: 1 }}
                 exit={{ opacity: 0 }}
                 transition={spring.calm}
-                className="rounded-3xl border-2 border-dashed border-bek-indigo/40 px-16 py-24 text-center"
+                className="rounded-3xl border-2 border-dashed border-bek-indigo/40
+                           px-8 py-10 sm:px-12 sm:py-16 lg:px-16 lg:py-24 text-center"
               >
-                <div className="text-display-md text-bek-darkText">
-                  Это вы?
-                </div>
-                <div className="text-body-md text-bek-darkTextMuted mt-2">
+                <div className="text-display-sm sm:text-display-md text-bek-darkText">Это вы?</div>
+                <div className="text-body-sm sm:text-body-md text-bek-darkTextMuted mt-2">
                   Подтверждаю личность…
                 </div>
               </motion.div>
@@ -333,20 +274,51 @@ export default function Kiosk() {
               />
             )}
 
-            {state.name === "error_unknown" && (
-              <ErrorBanner key="err-unknown" variant="unknown" />
-            )}
-            {state.name === "error_spoof" && (
-              <ErrorBanner key="err-spoof" variant="spoof" />
-            )}
+            {state.name === "error_unknown" && <ErrorBanner key="err-unknown" variant="unknown" />}
+            {state.name === "error_spoof" && <ErrorBanner key="err-spoof" variant="spoof" />}
           </AnimatePresence>
-        </div>
+        </section>
       </div>
 
+      {/* Footer in flow — never overlaps content. */}
       <KioskFooter online={online} />
 
-      {/* On-screen debug overlay — shown when URL has ?debug=1. */}
       {debugMode && <DebugOverlay state={state.name} cameraStatus={cameraStatus} online={online} />}
     </main>
+  );
+}
+
+// -----------------------------------------------------------------------------
+
+function DebugOverlay({
+  state,
+  cameraStatus,
+  online,
+}: {
+  state: string;
+  cameraStatus: string;
+  online: boolean;
+}) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 250);
+    return () => window.clearInterval(id);
+  }, []);
+  const stats = window.__bekStats__;
+  return (
+    <div className="fixed top-4 left-4 z-50 max-w-md px-3 py-2 rounded-xl bg-black/80 text-white text-xs font-mono leading-snug pointer-events-none">
+      <div>state: <b>{state}</b></div>
+      <div>camera: <b>{cameraStatus}</b></div>
+      <div>online: <b>{String(online)}</b></div>
+      {stats && (
+        <>
+          <div className="mt-1 pt-1 border-t border-white/20">
+            sent: <b>{stats.sent}</b> · recv: <b>{stats.received}</b> · err: <b>{stats.errors}</b>
+          </div>
+          <div>last: <b>{stats.lastStatus}</b> sim=<b>{stats.lastSim.toFixed(3)}</b></div>
+          <div>can_mark=<b>{String(stats.lastCanMark)}</b> emp=<b>{stats.lastEmployee ?? "—"}</b></div>
+        </>
+      )}
+    </div>
   );
 }

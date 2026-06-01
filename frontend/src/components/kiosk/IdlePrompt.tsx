@@ -21,10 +21,10 @@ export function IdlePrompt({ onStart }: Props) {
       <Clock size="big" />
 
       <div className="flex flex-col items-center gap-2 sm:gap-3">
-        <div className="text-display-md sm:text-display-lg lg:text-display-xl text-bek-darkText">
+        <div className="text-display-md sm:text-display-lg xl:text-display-xl text-bek-darkText whitespace-nowrap">
           {greetingFor(tod)}!
         </div>
-        <div className="text-body-md sm:text-display-sm text-bek-darkTextMuted max-w-md">
+        <div className="text-body-md sm:text-display-sm text-bek-darkTextMuted max-w-md text-balance">
           Нажмите, чтобы отметить приход или уход.
         </div>
       </div>
