@@ -30,6 +30,44 @@ import { api, ApiError } from "@/lib/api";
 import { attendanceMarkResponseSchema } from "@/lib/zod";
 import { spring } from "@/lib/motion";
 
+function DebugOverlay({
+  state,
+  cameraStatus,
+  online,
+}: {
+  state: string;
+  cameraStatus: string;
+  online: boolean;
+}) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 250);
+    return () => window.clearInterval(id);
+  }, []);
+  const stats = window.__bekStats__;
+  void tick; // re-render every 250ms to refresh stats
+  return (
+    <div className="fixed top-4 left-4 z-50 max-w-md px-3 py-2 rounded-xl bg-black/80 text-white text-xs font-mono leading-snug pointer-events-none">
+      <div>state: <b>{state}</b></div>
+      <div>camera: <b>{cameraStatus}</b></div>
+      <div>online: <b>{String(online)}</b></div>
+      {stats && (
+        <>
+          <div className="mt-1 pt-1 border-t border-white/20">
+            sent: <b>{stats.sent}</b> · recv: <b>{stats.received}</b> · err: <b>{stats.errors}</b>
+          </div>
+          <div>
+            last: <b>{stats.lastStatus}</b> sim=<b>{stats.lastSim.toFixed(3)}</b>
+          </div>
+          <div>
+            can_mark=<b>{String(stats.lastCanMark)}</b> emp=<b>{stats.lastEmployee ?? "—"}</b>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 const SUCCESS_LINGER_MS = 1600;
 const ERROR_LINGER_MS = 6000;
 const KIOSK_BUTTON_TIMEOUT_MS = 10_000;
@@ -308,13 +346,7 @@ export default function Kiosk() {
       <KioskFooter online={online} />
 
       {/* On-screen debug overlay — shown when URL has ?debug=1. */}
-      {debugMode && (
-        <div className="fixed top-4 left-4 z-50 max-w-sm px-3 py-2 rounded-xl bg-black/70 text-white text-xs font-mono leading-snug pointer-events-none">
-          <div>state: <b>{state.name}</b></div>
-          <div>camera: <b>{cameraStatus}</b></div>
-          <div>online: <b>{String(online)}</b></div>
-        </div>
-      )}
+      {debugMode && <DebugOverlay state={state.name} cameraStatus={cameraStatus} online={online} />}
     </main>
   );
 }
