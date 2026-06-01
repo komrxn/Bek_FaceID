@@ -4,7 +4,7 @@
 #   docker build -t bek-faceid-backend ./backend
 # Run (GPU passthrough handled by docker-compose):
 #   docker run --gpus all -p 8000:8000 -v ./data:/data bek-faceid-backend
-FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -38,6 +38,12 @@ ENV EXECUTION_PROVIDERS="CUDAExecutionProvider,CPUExecutionProvider" \
     DATA_DIR="/data"
 
 EXPOSE 8000
+
+# Entrypoint: run alembic migrations idempotently, then start uvicorn.
+# This makes the container self-sufficient — no manual migration step on a fresh DB.
+COPY backend/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Single worker — see CLAUDE.md §Single-worker constraint (in-process debounce).
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

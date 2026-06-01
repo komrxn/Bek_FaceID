@@ -55,8 +55,9 @@ services:
       dockerfile: frontend/Dockerfile
     container_name: bek-faceid-frontend
     restart: unless-stopped
-    ports:
-      - "80:80"
+    # Frontend port is set in docker-compose.override.yml so different
+    # deployments (LAN, public via Cloudflare tunnel, etc.) can pick a free port
+    # without editing the main compose file.
     depends_on:
       backend:
         condition: service_started
