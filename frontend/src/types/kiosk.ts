@@ -33,6 +33,7 @@ export interface ScanningState extends BaseState {
 export interface DetectedPendingLivenessState extends BaseState {
   name: "detected_pending_liveness";
   employee: EmployeePublic;
+  noiseStreak: number;
 }
 
 export interface RecognizedRealState extends BaseState {
@@ -40,6 +41,16 @@ export interface RecognizedRealState extends BaseState {
   employee: EmployeePublic;
   pendingToken: string;
   lastEventToday: LastEventToday | null;
+  /** How many consecutive non-recognized frames we've tolerated since the last
+   * confirmed recognition. Used so a brief blink/motion-blur doesn't drop
+   * the card out from under the user's finger. */
+  noiseStreak: number;
+}
+
+export interface DetectedPendingLivenessStateExt extends BaseState {
+  name: "detected_pending_liveness";
+  employee: EmployeePublic;
+  noiseStreak: number;
 }
 
 export interface AwaitingButtonTapState extends BaseState {
@@ -79,6 +90,10 @@ export type KioskState =
   | AlreadyMarkedState
   | ErrorUnknownState
   | ErrorSpoofState;
+
+// Tolerate up to N consecutive non-recognized frames while the user is on
+// camera before dropping the recognition card. At 300ms poll = ~900ms grace.
+export const NOISE_TOLERANCE = 3;
 
 // --- Actions -----------------------------------------------------------------
 

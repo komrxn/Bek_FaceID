@@ -14,7 +14,7 @@
  *     even if the person walks away and a `no_face` arrives.
  */
 
-import type { KioskAction, KioskState } from "@/types/kiosk";
+import { NOISE_TOLERANCE, type KioskAction, type KioskState } from "@/types/kiosk";
 
 export const initialState: KioskState = { name: "idle" };
 
@@ -89,14 +89,29 @@ export function reducer(state: KioskState, action: KioskAction): KioskState {
         return { name: "error_spoof" };
       }
 
-      // No face / low quality → остаёмся в scanning. Таймер «нет лица 5 сек»
-      // в Kiosk.tsx сам отправит TIMEOUT и вернёт нас в idle.
-      if (r.status === "no_face" || r.status === "low_quality") {
-        return { name: "scanning" };
-      }
+      // Noisy "not recognized" frames — no_face / low_quality / unknown.
+      // Если у нас уже была карточка (recognized_real / pending_liveness),
+      // держим её до NOISE_TOLERANCE подряд таких "промахов" — лицо могло
+      // моргнуть / отвернуться на 200мс. Иначе UI мигает и юзер не успевает
+      // нажать кнопку.
+      const isNoisy =
+        r.status === "no_face" ||
+        r.status === "low_quality" ||
+        r.status === "unknown";
 
-      // Unknown — лицо есть, но не распознано. Остаёмся scanning.
-      if (r.status === "unknown") {
+      if (isNoisy) {
+        if (state.name === "recognized_real") {
+          if (state.noiseStreak + 1 >= NOISE_TOLERANCE) {
+            return { name: "scanning" };
+          }
+          return { ...state, noiseStreak: state.noiseStreak + 1 };
+        }
+        if (state.name === "detected_pending_liveness") {
+          if (state.noiseStreak + 1 >= NOISE_TOLERANCE) {
+            return { name: "scanning" };
+          }
+          return { ...state, noiseStreak: state.noiseStreak + 1 };
+        }
         return { name: "scanning" };
       }
 
@@ -118,6 +133,7 @@ export function reducer(state: KioskState, action: KioskAction): KioskState {
           employee: r.employee,
           pendingToken: r.pending_event_token,
           lastEventToday: r.last_event_today,
+          noiseStreak: 0, // ← каждый recognized сбрасывает счётчик
         };
       }
 
@@ -125,6 +141,7 @@ export function reducer(state: KioskState, action: KioskAction): KioskState {
       return {
         name: "detected_pending_liveness",
         employee: r.employee,
+        noiseStreak: 0,
       };
     }
 
