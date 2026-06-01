@@ -15,11 +15,11 @@ export function Clock({ size = "small" }: Props) {
 
   if (size === "big") {
     return (
-      <div className="flex flex-col items-center gap-2">
-        <div className="text-display-2xl tabular-nums text-bek-darkText">
+      <div className="flex flex-col items-center gap-1 sm:gap-2">
+        <div className="text-display-xl sm:text-display-2xl tabular-nums text-bek-darkText">
           {formatTime(now)}
         </div>
-        <div className="text-display-sm text-bek-darkTextMuted">{formatDate(now)}</div>
+        <div className="text-body-md sm:text-display-sm text-bek-darkTextMuted">{formatDate(now)}</div>
       </div>
     );
   }

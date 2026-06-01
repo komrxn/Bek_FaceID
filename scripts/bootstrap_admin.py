@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Seed (or update) the single admin user.
 
-Usage:
-  cd backend && .venv/bin/python ../scripts/bootstrap_admin.py admin mypassword
+Usage (host or container):
+  python scripts/bootstrap_admin.py <username> <password>
 
 If the username already exists, its password hash is replaced — convenient
 for password resets on a single-tenant LAN tool.
+
+This script auto-detects whether it runs inside the docker image (where
+the backend code lives at `/app`) or outside (where it lives at
+`<repo>/backend`).
 """
 
 from __future__ import annotations
@@ -14,9 +18,14 @@ import asyncio
 import sys
 from pathlib import Path
 
-# Make `app` importable when running from repo root or scripts/.
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "backend"))
+# Make `app` importable wherever this script is run.
+for candidate in (
+    Path("/app"),                                    # inside container
+    Path(__file__).resolve().parents[1] / "backend", # repo root layout
+):
+    if (candidate / "app").is_dir():
+        sys.path.insert(0, str(candidate))
+        break
 
 from app.db.database import SessionLocal  # noqa: E402
 from app.db import crud  # noqa: E402

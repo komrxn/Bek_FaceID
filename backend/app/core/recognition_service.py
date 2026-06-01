@@ -56,15 +56,13 @@ def run_pipeline(
     """The blocking portion — runs on the single-thread GPU executor."""
     face = engine.detect_largest(bgr)
     if face is None:
-        logger.debug("[recognize] no_face frame=%sx%s", bgr.shape[1], bgr.shape[0])
         return FrameResult(RecognizeStatus.no_face, None, 0.0, 1.0)
 
     bbox = face.bbox
     w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
     if face.det_score < 0.5 or w * h < 80 * 80:
-        logger.info(
-            "[recognize] low_quality det=%.2f bbox=%dx%d frame=%sx%s",
-            float(face.det_score), int(w), int(h), bgr.shape[1], bgr.shape[0],
+        logger.debug(
+            "low_quality det=%.2f bbox=%dx%d", float(face.det_score), int(w), int(h),
         )
         return FrameResult(RecognizeStatus.low_quality, None, 0.0, 1.0)
 
@@ -81,20 +79,22 @@ def run_pipeline(
     emb = engine.embed(face)
     employee_id, sim = engine.search(emb)
 
-    # Always log per-frame numbers — invaluable when tuning thresholds in the
-    # field. Verbose but rate-limited by kiosk poll (~3 fps).
-    logger.info(
-        "[recognize] det=%.2f bbox=%dx%d frame=%dx%d emp_id=%s sim=%.3f thr_strong=%.2f thr_soft=%.2f",
-        float(face.det_score), int(w), int(h),
-        bgr.shape[1], bgr.shape[0],
-        employee_id if employee_id is not None else "—",
-        sim, threshold_strong, threshold_soft,
+    # Per-frame numbers at DEBUG — viewable via LOG_LEVEL=DEBUG; silent in prod.
+    logger.debug(
+        "det=%.2f sim=%.3f emp=%s thr=%.2f",
+        float(face.det_score), sim, employee_id, threshold_strong,
     )
 
     if employee_id is None or sim < threshold_soft:
         return FrameResult(RecognizeStatus.unknown, None, max(0.0, sim), anti_spoof_score)
 
     if sim < threshold_strong:
+        # Borderline match — keep at INFO so the operator can spot enrollment
+        # candidates whose photo set should be expanded.
+        logger.info(
+            "soft-match emp_id=%s sim=%.3f (between %.2f and %.2f)",
+            employee_id, sim, threshold_soft, threshold_strong,
+        )
         return FrameResult(RecognizeStatus.unknown, None, sim, anti_spoof_score)
 
     return FrameResult(

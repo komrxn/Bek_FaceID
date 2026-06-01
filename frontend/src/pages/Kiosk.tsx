@@ -231,7 +231,7 @@ export default function Kiosk() {
       </div>
 
       {/* Main grid: 58/42 split on landscape, stacked on portrait */}
-      <div className="relative z-10 w-full h-full grid grid-cols-1 lg:grid-cols-[58fr_42fr] gap-6 p-12 pb-24">
+      <div className="relative z-10 w-full h-full grid grid-cols-1 xl:grid-cols-[58fr_42fr] gap-4 sm:gap-6 p-4 sm:p-8 lg:p-12 pb-24">
         {/* Camera stage (or denied-fallback) */}
         <div className="relative">
           {cameraStatus === "denied" || cameraStatus === "error" ? (
