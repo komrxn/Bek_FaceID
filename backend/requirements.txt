@@ -16,6 +16,9 @@ itsdangerous==2.2.0
 pydantic==2.10.4
 pydantic-settings==2.7.0
 
+# --- Timezone data (Linux base images often ship without /usr/share/zoneinfo)
+tzdata==2024.2
+
 # --- Recognition (InsightFace + FAISS) ---
 # onnxruntime-gpu in prod Linux+CUDA. For local Mac dev, swap to onnxruntime-silicon.
 onnxruntime-gpu==1.20.1; sys_platform == "linux"
