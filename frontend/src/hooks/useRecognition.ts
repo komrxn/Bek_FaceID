@@ -16,6 +16,12 @@ import { api } from "@/lib/api";
 import { recognizeResponseSchema } from "@/lib/zod";
 import type { KioskAction, KioskStateName } from "@/types/kiosk";
 
+declare global {
+  interface Window {
+    __BEK_DEBUG__?: boolean;
+  }
+}
+
 const KIOSK_ID = "main";
 
 // idle — НЕ опрашиваем (камера выключена; ждём нажатия кнопки «Начать»).
@@ -61,11 +67,24 @@ export function useRecognition({ stateName, captureJpeg, dispatch }: Args): void
           signal: ac.signal,
         });
         if (stopped) return;
+        // Debug — viewable in Safari Web Inspector connected from Mac.
+        if (window.__BEK_DEBUG__) {
+          // eslint-disable-next-line no-console
+          console.debug("[recognize]", res.status, res.confidence?.toFixed(3), {
+            can_mark: res.can_mark_attendance,
+            emp: res.employee?.full_name,
+          });
+        }
         dispatch({ type: "FRAME_RESULT", payload: res });
       } catch (err) {
         if ((err as DOMException)?.name === "AbortError") return;
-        // Network blip; the next tick will retry. Don't surface — the FSM
-        // stays where it is.
+        // Surface anything else — Zod-parse mismatch, 5xx, network — so we
+        // can spot the silent failure mode that has been biting us.
+        // eslint-disable-next-line no-console
+        console.error("[recognize] FAILED", err);
+        if (typeof window !== "undefined") {
+          (window as Window & { __bekLastError__?: unknown }).__bekLastError__ = err;
+        }
       }
     };
 

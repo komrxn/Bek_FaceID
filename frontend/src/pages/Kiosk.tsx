@@ -45,6 +45,15 @@ export default function Kiosk() {
   }, []);
 
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Включаем подробные console logs если в URL `?debug=1`. Удобно когда
+  // подключаешь iPad-Safari к Mac через Web Inspector.
+  const debugMode = typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("debug") === "1";
+  useEffect(() => {
+    window.__BEK_DEBUG__ = debugMode;
+  }, [debugMode]);
+
   // Камера живёт ТОЛЬКО когда нужна — не в idle. Это снимает запись
   // прохожих случайно мимо двери и экономит CPU.
   const cameraActive = state.name !== "idle";
@@ -297,6 +306,15 @@ export default function Kiosk() {
       </div>
 
       <KioskFooter online={online} />
+
+      {/* On-screen debug overlay — shown when URL has ?debug=1. */}
+      {debugMode && (
+        <div className="fixed top-4 left-4 z-50 max-w-sm px-3 py-2 rounded-xl bg-black/70 text-white text-xs font-mono leading-snug pointer-events-none">
+          <div>state: <b>{state.name}</b></div>
+          <div>camera: <b>{cameraStatus}</b></div>
+          <div>online: <b>{String(online)}</b></div>
+        </div>
+      )}
     </main>
   );
 }
