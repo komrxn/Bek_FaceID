@@ -1,0 +1,44 @@
+@import "@fontsource/inter/cyrillic-400.css";
+@import "@fontsource/inter/cyrillic-500.css";
+@import "@fontsource/inter/cyrillic-600.css";
+@import "@fontsource/inter/cyrillic-700.css";
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    font-feature-settings: "cv11", "ss01";
+    font-variant-numeric: tabular-nums;
+  }
+  /* Default focus ring everywhere — never removed. */
+  *:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.4), 0 0 0 4px rgba(255, 255, 255, 0.0);
+    border-radius: 6px;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  /* iOS-style squircle for employee photos. */
+  .mask-squircle {
+    border-radius: 28% / 32%;
+  }
+}

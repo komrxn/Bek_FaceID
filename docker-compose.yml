@@ -1,0 +1,62 @@
+# BEK_FaceID — local LAN deployment for restaurant БЕК.
+#
+# Prerequisites:
+#   * NVIDIA driver + Container Toolkit on the host:
+#       sudo apt install nvidia-container-toolkit && sudo systemctl restart docker
+#   * Run scripts/download_models.sh once to populate ./models/ (InsightFace
+#     buffalo_l + Silent-Face ONNX).
+#   * Edit .env (copy from .env.example) and pick a strong SESSION_SECRET.
+#
+# Run:
+#   docker compose up -d --build
+#
+# Kiosk tablet:
+#   chrome --kiosk --use-fake-ui-for-media-stream http://<server-lan-ip>/
+#
+# Admin:
+#   http://<server-lan-ip>/admin (default admin/bek2026admin — change with
+#   scripts/bootstrap_admin.py before exposing on the LAN).
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: bek-faceid-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_URL: sqlite+aiosqlite:////data/bek.db
+      MODELS_DIR: /models
+      DATA_DIR: /data
+      EXECUTION_PROVIDERS: CUDAExecutionProvider,CPUExecutionProvider
+    volumes:
+      - ./models:/models:ro
+      - ./data:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: bek-faceid-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_started

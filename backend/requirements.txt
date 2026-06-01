@@ -1,0 +1,35 @@
+# --- Web ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# --- DB ---
+sqlalchemy[asyncio]==2.0.36
+aiosqlite==0.20.0
+alembic==1.14.0
+
+# --- Auth ---
+bcrypt==4.2.1
+itsdangerous==2.2.0
+
+# --- Settings ---
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# --- Recognition (InsightFace + FAISS) ---
+# onnxruntime-gpu in prod Linux+CUDA. For local Mac dev, swap to onnxruntime-silicon.
+onnxruntime-gpu==1.20.1; sys_platform == "linux"
+onnxruntime==1.20.1; sys_platform == "darwin"
+insightface==0.7.3
+faiss-cpu==1.9.0
+opencv-python-headless==4.10.0.84
+numpy<2.0
+Pillow==11.0.0
+
+# --- Excel ---
+openpyxl==3.1.5
+
+# --- Tests ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1

@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Seed (or update) the single admin user.
+
+Usage:
+  cd backend && .venv/bin/python ../scripts/bootstrap_admin.py admin mypassword
+
+If the username already exists, its password hash is replaced — convenient
+for password resets on a single-tenant LAN tool.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+# Make `app` importable when running from repo root or scripts/.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
+
+from app.db.database import SessionLocal  # noqa: E402
+from app.db import crud  # noqa: E402
+from app.security.passwords import hash_password  # noqa: E402
+
+
+async def main(username: str, password: str) -> None:
+    async with SessionLocal() as session:
+        existing = await crud.get_admin_by_username(session, username)
+        ph = hash_password(password)
+        if existing is None:
+            await crud.create_admin(session, username, ph)
+            await session.commit()
+            print(f"[bootstrap_admin] created admin user '{username}'")
+        else:
+            existing.password_hash = ph
+            await session.commit()
+            print(f"[bootstrap_admin] reset password for admin user '{username}'")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("usage: bootstrap_admin.py <username> <password>", file=sys.stderr)
+        sys.exit(2)
+    asyncio.run(main(sys.argv[1], sys.argv[2]))
