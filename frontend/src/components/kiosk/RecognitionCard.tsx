@@ -29,7 +29,7 @@ export function RecognitionCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.92 }}
       transition={spring.calm}
-      className="flex flex-col items-center gap-6 sm:gap-8 lg:gap-10 px-4 sm:px-6 lg:px-10 max-w-[640px] w-full"
+      className="flex flex-col items-center gap-5 sm:gap-7 md:gap-8 lg:gap-10 px-4 sm:px-6 lg:px-8 max-w-[680px] w-full"
     >
       {/* Photo */}
       <motion.div
@@ -42,10 +42,10 @@ export function RecognitionCard({
           <img
             src={mediaUrl(employee.photo_url) ?? ""}
             alt={employee.full_name}
-            className="w-28 h-28 sm:w-36 sm:h-36 lg:w-44 lg:h-44 object-cover mask-squircle ring-4 ring-white/15 shadow-2xl"
+            className="w-36 h-36 xs:w-40 xs:h-40 sm:w-44 sm:h-44 md:w-48 md:h-48 lg:w-56 lg:h-56 object-cover mask-squircle ring-4 ring-white/15 shadow-2xl"
           />
         ) : (
-          <div className="w-28 h-28 sm:w-36 sm:h-36 lg:w-44 lg:h-44 mask-squircle bg-bek-darkSurface2 text-bek-indigo flex items-center justify-center text-display-xl lg:text-display-2xl font-bold ring-4 ring-white/15">
+          <div className="w-36 h-36 xs:w-40 xs:h-40 sm:w-44 sm:h-44 md:w-48 md:h-48 lg:w-56 lg:h-56 mask-squircle bg-bek-darkSurface2 text-bek-indigo flex items-center justify-center text-display-xl lg:text-display-2xl font-bold ring-4 ring-white/15">
             {employee.full_name.slice(0, 1)}
           </div>
         )}
@@ -58,10 +58,10 @@ export function RecognitionCard({
         transition={{ ...spring.calm, delay: 0.08 }}
         className="flex flex-col gap-1.5 sm:gap-2 text-center"
       >
-        <div className="text-display-md sm:text-display-lg text-bek-darkText leading-tight text-balance">
+        <div className="text-display-lg sm:text-display-xl md:text-display-xl lg:text-display-2xl text-bek-darkText leading-[1.05] text-balance">
           {employee.full_name}
         </div>
-        <div className="text-body-md sm:text-display-sm text-bek-darkTextMuted">
+        <div className="text-display-sm sm:text-display-md text-bek-darkTextMuted">
           {employee.position}
         </div>
         {lastEventToday && (
