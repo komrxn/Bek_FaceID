@@ -87,14 +87,21 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # During dev the Vite dev server (5173) talks to FastAPI (8000). In prod
-    # nginx serves the SPA on the same origin so this is moot — but tighten
-    # the allowlist before exposing to LAN.
+    # CORS allow-list:
+    #   - localhost:5173 — Vite dev server during local frontend work
+    #   - https://localhost — Capacitor Android WebView origin (V1.2 kiosk APK).
+    #     Capacitor 5+ defaults to https://localhost when androidScheme=https.
+    #   - capacitor://localhost — older Capacitor releases / iOS WebView, kept
+    #     so the same backend serves a future iOS build with no change.
+    # The production browser SPA at bek-faceid.ascenderframework.dev is same-origin
+    # (nginx + backend share the host) so it doesn't need an entry here.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
+            "https://localhost",
+            "capacitor://localhost",
         ],
         allow_credentials=True,
         allow_methods=["*"],

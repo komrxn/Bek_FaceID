@@ -7,8 +7,10 @@
  */
 
 import type { z } from "zod";
+import { apiBase } from "./platform";
 
-const API_BASE = ""; // same-origin in dev (Vite proxy) and prod (nginx)
+// Web build: same-origin "" (Vite proxy / nginx).
+// Native (Capacitor APK): absolute Cloudflare URL — see platform.ts.
 
 export class ApiError extends Error {
   status: number;
@@ -44,7 +46,7 @@ export async function api<S extends z.ZodTypeAny | undefined>(
     body = JSON.stringify(opts.body);
   }
 
-  const res = await fetch(`${API_BASE}${opts.path}`, {
+  const res = await fetch(`${apiBase()}${opts.path}`, {
     method: opts.method ?? "GET",
     headers,
     body,

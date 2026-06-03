@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Splash screen — 2732×2732 master (Capacitor scales for every density).
+  Same brand mark as icon.svg but at ~22% of frame so it sits visually
+  centered while leaving breathing room for the splash darkness around it.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2732 2732" width="2732" height="2732">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="40%" fx="50%" fy="42%">
+      <stop offset="0%" stop-color="#4F46E5" stop-opacity="0.22" />
+      <stop offset="60%" stop-color="#4F46E5" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#4F46E5" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="2732" height="2732" fill="#0B1020" />
+  <rect x="0" y="0" width="2732" height="2732" fill="url(#glow)" />
+
+  <!-- Mark scaled to ~22% of frame, centered.
+       1024-viewBox source path scaled by 0.6 and translated to (1058, 1058)
+       so the 600×560 visual mass sits dead-center. -->
+  <g transform="translate(1058, 1058) scale(0.6)">
+    <path
+      fill="#F8FAFC"
+      d="
+        M 360 200
+        L 660 200
+        Q 690 200 690 230
+        L 690 286
+        Q 690 316 660 316
+        L 492 316
+        L 492 426
+        L 568 426
+        Q 700 426 700 552
+        L 700 626
+        Q 700 760 568 760
+        L 360 760
+        Q 330 760 330 730
+        L 330 230
+        Q 330 200 360 200
+        Z
+
+        M 492 542
+        L 492 644
+        L 560 644
+        Q 568 644 568 636
+        L 568 550
+        Q 568 542 560 542
+        Z
+      "
+    />
+  </g>
+</svg>

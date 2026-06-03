@@ -1,6 +1,17 @@
 import { lazy, Suspense } from "react";
 import { Navigate, createBrowserRouter } from "react-router-dom";
 import { useMe } from "@/hooks/useAdminAuth";
+import { isNative } from "@/lib/platform";
+
+/**
+ * KioskOnly — when the bundle is running inside the Capacitor APK we redirect
+ * every admin route back to `/`. The admin panel is meant for a laptop / phone
+ * browser via the Cloudflare URL, not for the front-of-house tablet.
+ */
+function KioskOnly({ children }: { children: React.ReactNode }) {
+  if (isNative()) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
 
 const Kiosk = lazy(() => import("@/pages/Kiosk"));
 const AdminLayout = lazy(() => import("@/pages/admin/AdminLayout"));
@@ -44,21 +55,25 @@ export const router = createBrowserRouter([
   {
     path: "/admin/login",
     element: (
-      <Suspense fallback={<FullScreenLoader />}>
-        <RedirectIfAuthed>
-          <Login />
-        </RedirectIfAuthed>
-      </Suspense>
+      <KioskOnly>
+        <Suspense fallback={<FullScreenLoader />}>
+          <RedirectIfAuthed>
+            <Login />
+          </RedirectIfAuthed>
+        </Suspense>
+      </KioskOnly>
     ),
   },
   {
     path: "/admin",
     element: (
-      <Suspense fallback={<FullScreenLoader />}>
-        <RequireAuth>
-          <AdminLayout />
-        </RequireAuth>
-      </Suspense>
+      <KioskOnly>
+        <Suspense fallback={<FullScreenLoader />}>
+          <RequireAuth>
+            <AdminLayout />
+          </RequireAuth>
+        </Suspense>
+      </KioskOnly>
     ),
     children: [
       { index: true, element: <Navigate to="/admin/employees" replace /> },

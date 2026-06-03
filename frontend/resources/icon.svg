@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  БЕК kiosk launcher icon — 1024×1024 master.
+  Composition: solid bek.darkBg with a 25% indigo radial glow in the upper-right
+  quadrant (same vibe as AmbientBackground.tsx), and a bold sans-serif Cyrillic
+  "Б" mark in bek.darkText. The mark sits inside the safe 80% center so the
+  Android adaptive-icon mask never crops the stem.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="glow" cx="78%" cy="22%" r="60%" fx="78%" fy="22%">
+      <stop offset="0%" stop-color="#4F46E5" stop-opacity="0.42" />
+      <stop offset="55%" stop-color="#4F46E5" stop-opacity="0.10" />
+      <stop offset="100%" stop-color="#4F46E5" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#141B36" />
+      <stop offset="100%" stop-color="#0B1020" />
+    </linearGradient>
+  </defs>
+
+  <!-- Base background -->
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#bgGrad)" />
+  <!-- Indigo glow accent -->
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#glow)" />
+
+  <!-- Bold Cyrillic "Б" mark.
+       Drawn as a path so the icon doesn't depend on a system font being
+       present on every Android device. Geometry sized for 1024×1024:
+         - cap height 560
+         - stroke weight 132 (heavy / display-grade)
+         - left stem at x≈360, baseline at y≈760
+         - rounded top serif + flat top bar typical of БЕК brand. -->
+  <path
+    fill="#F8FAFC"
+    d="
+      M 360 200
+      L 660 200
+      Q 690 200 690 230
+      L 690 286
+      Q 690 316 660 316
+      L 492 316
+      L 492 426
+      L 568 426
+      Q 700 426 700 552
+      L 700 626
+      Q 700 760 568 760
+      L 360 760
+      Q 330 760 330 730
+      L 330 230
+      Q 330 200 360 200
+      Z
+
+      M 492 542
+      L 492 644
+      L 560 644
+      Q 568 644 568 636
+      L 568 550
+      Q 568 542 560 542
+      Z
+    "
+  />
+</svg>

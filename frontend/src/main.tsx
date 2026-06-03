@@ -3,9 +3,14 @@ import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "react-router-dom";
 import { ErrorBoundary } from "@/components/app/ErrorBoundary";
+import { initKioskApp } from "@/lib/platform";
 import { queryClient } from "@/lib/query-client";
 import { router } from "@/router";
 import "./index.css";
+
+// Fire-and-forget: kiosk-mode bootstrap on Android (status bar / orientation /
+// back button / splash hide). No-op on the web — see platform.ts.
+void initKioskApp();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
