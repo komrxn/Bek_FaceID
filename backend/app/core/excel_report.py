@@ -1,17 +1,22 @@
 """Monthly attendance Excel ("Табель") for accountant Зарина.
 
+V1.1: dropped "опоздал N мин" / "ранний уход N мин" — schedules are too
+volatile per employee for those metrics to mean anything. The xlsx now
+shows the honest day shape: when came, when left, hours worked, or
+"Не отметился" for enrolled employees who didn't mark.
+
 Output structure:
   Sheet 1 — "Табель YYYY-MM"
-    Header row:   employee | day 1 | day 2 | … | day N | TOTAL
-    Each data cell: "П HH:MM\nУ HH:MM\nЧасы X.X" or "—" if absent.
+    Header row:   employee | day 1 | day 2 | … | day N | Часов за месяц
+    Each data cell: "П HH:MM\\nУ HH:MM\\nЧасов X.X" or "Не отметился"
+                    or "П HH:MM\\nна месте" (came but no went).
     Conditional fill:
-      green — on time, full hours
-      amber — late (lateMinutes > 0)
-      red   — early-leave (earlyLeaveMinutes > 0)
-      gray  — absent
+      green  — completed (came + went)
+      blue   — currently on shift (came, no went)
+      gray   — absent / "не отметился"
   Sheet 2 — "Сводка"
-    Per employee: total hours, total late minutes, total early-leave minutes,
-    days present, days absent.
+    Per employee: Отдел, Должность, Часов всего, Дней отработано,
+                  Дней не отметился.
 
 Reuses `app.core.attendance_metrics.derive_day_metrics` so the dashboard
 and the Excel always show the same numbers.
@@ -21,9 +26,8 @@ from __future__ import annotations
 
 import calendar
 from collections.abc import Iterable
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date
 from io import BytesIO
-from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -32,9 +36,7 @@ from openpyxl.utils import get_column_letter
 from app.core.attendance_metrics import (
     AttendanceEvent as MetricsEvent,
     DayMetrics,
-    EmployeeSchedule,
     derive_day_metrics,
-    shift_day_for,
     bucket_events_by_shift_day,
 )
 
@@ -43,14 +45,18 @@ from app.core.attendance_metrics import (
 PALETTE = {
     "header_bg":   "1F2937",
     "header_text": "FFFFFF",
-    "fill_green":  "DCFCE7",
-    "fill_amber":  "FEF3C7",
-    "fill_red":    "FEE2E2",
-    "fill_gray":   "F1F5F9",
+    "fill_green":  "DCFCE7",   # completed
+    "fill_blue":   "DBEAFE",   # currently on shift
+    "fill_gray":   "F1F5F9",   # absent / не отметился
     "text_green":  "166534",
-    "text_amber":  "92400E",
-    "text_red":    "991B1B",
+    "text_blue":   "1E40AF",
     "text_gray":   "475569",
+}
+
+DEPARTMENT_LABEL_RU = {
+    "hall": "Зал",
+    "kitchen": "Кухня",
+    "other": "Прочее",
 }
 
 THIN = Side(style="thin", color="E5E7EB")
@@ -67,26 +73,26 @@ def _fill(hex_color: str) -> PatternFill:
 
 
 def _tone_for(metrics: DayMetrics) -> str:
-    """Return one of 'green', 'amber', 'red', 'gray' for the cell color."""
+    """Return one of 'green', 'blue', 'gray' for the cell color."""
     if not metrics.is_present:
         return "gray"
-    if metrics.early_leave_minutes > 0:
-        return "red"
-    if metrics.late_minutes > 0:
-        return "amber"
+    if metrics.went_at is None:
+        return "blue"
     return "green"
 
 
 def _cell_text(metrics: DayMetrics) -> str:
     if not metrics.is_present:
-        return "—"
+        return "Не отметился"
     parts: list[str] = []
     if metrics.came_at is not None:
         parts.append(f"П {metrics.came_at.strftime('%H:%M')}")
     if metrics.went_at is not None:
         parts.append(f"У {metrics.went_at.strftime('%H:%M')}")
-    if metrics.worked_hours > 0:
-        parts.append(f"{metrics.worked_hours:.1f} ч.")
+        if metrics.worked_hours > 0:
+            parts.append(f"{metrics.worked_hours:.1f} ч.")
+    else:
+        parts.append("на месте")
     return "\n".join(parts)
 
 
@@ -99,15 +105,15 @@ def _days_in_month(year: int, month: int) -> list[date]:
 
 
 class EmployeeForReport:
-    __slots__ = ("id", "full_name", "position", "schedule")
+    __slots__ = ("id", "full_name", "position", "department")
 
     def __init__(
-        self, *, id: int, full_name: str, position: str, schedule: EmployeeSchedule
+        self, *, id: int, full_name: str, position: str, department: str
     ) -> None:
         self.id = id
         self.full_name = full_name
         self.position = position
-        self.schedule = schedule
+        self.department = department
 
 
 # ---- Builder ---------------------------------------------------------------
@@ -158,7 +164,12 @@ def build_xlsx(
     # Body
     summary: list[tuple[EmployeeForReport, dict[str, float | int]]] = []
     for row_idx, emp in enumerate(employees, start=2):
-        ws.cell(row=row_idx, column=1, value=f"{emp.full_name}\n{emp.position}")
+        dept_label = DEPARTMENT_LABEL_RU.get(emp.department, emp.department)
+        ws.cell(
+            row=row_idx,
+            column=1,
+            value=f"{emp.full_name}\n{dept_label} · {emp.position}",
+        )
         name_cell = ws.cell(row=row_idx, column=1)
         name_cell.font = H_NAME
         name_cell.alignment = Alignment(vertical="center", wrap_text=True)
@@ -170,13 +181,11 @@ def build_xlsx(
         )
 
         total_hours = 0.0
-        total_late = 0
-        total_early = 0
         days_present = 0
+        days_unmarked = 0
 
         for col_offset, d in enumerate(days):
             metrics = derive_day_metrics(
-                emp.schedule,
                 buckets.get(d, []),
                 tz_name=tz_name,
                 shift_day_cutoff_hour=shift_day_cutoff_hour,
@@ -192,10 +201,10 @@ def build_xlsx(
             cell.border = BORDER
 
             total_hours += metrics.worked_hours
-            total_late += metrics.late_minutes
-            total_early += metrics.early_leave_minutes
             if metrics.is_present:
                 days_present += 1
+            else:
+                days_unmarked += 1
 
         total_cell = ws.cell(row=row_idx, column=total_col, value=round(total_hours, 1))
         total_cell.font = H_NAME
@@ -207,9 +216,8 @@ def build_xlsx(
                 emp,
                 {
                     "total_hours": round(total_hours, 1),
-                    "total_late_minutes": total_late,
-                    "total_early_leave_minutes": total_early,
                     "days_present": days_present,
+                    "days_unmarked": days_unmarked,
                     "days_total": len(days),
                 },
             )
@@ -221,11 +229,11 @@ def build_xlsx(
     ws2 = wb.create_sheet("Сводка")
     headers = [
         "Сотрудник",
+        "Отдел",
         "Должность",
-        "Часов",
-        "Дней присутствовал",
-        "Опозданий, мин",
-        "Раннего ухода, мин",
+        "Часов всего",
+        "Дней отработано",
+        "Дней не отметился",
     ]
     for i, h in enumerate(headers, start=1):
         c = ws2.cell(row=1, column=i, value=h)
@@ -235,19 +243,24 @@ def build_xlsx(
 
     for row_idx, (emp, s) in enumerate(summary, start=2):
         ws2.cell(row=row_idx, column=1, value=emp.full_name).font = H_NAME
-        ws2.cell(row=row_idx, column=2, value=emp.position).font = H_CELL
-        ws2.cell(row=row_idx, column=3, value=s["total_hours"]).font = H_CELL
-        ws2.cell(row=row_idx, column=4, value=f"{s['days_present']} / {s['days_total']}").font = H_CELL
-        late_c = ws2.cell(row=row_idx, column=5, value=s["total_late_minutes"])
-        late_c.font = H_CELL
-        if s["total_late_minutes"] > 0:
-            late_c.fill = _fill(PALETTE["fill_amber"])
-        early_c = ws2.cell(row=row_idx, column=6, value=s["total_early_leave_minutes"])
-        early_c.font = H_CELL
-        if s["total_early_leave_minutes"] > 0:
-            early_c.fill = _fill(PALETTE["fill_red"])
+        ws2.cell(
+            row=row_idx,
+            column=2,
+            value=DEPARTMENT_LABEL_RU.get(emp.department, emp.department),
+        ).font = H_CELL
+        ws2.cell(row=row_idx, column=3, value=emp.position).font = H_CELL
+        ws2.cell(row=row_idx, column=4, value=s["total_hours"]).font = H_CELL
+        ws2.cell(
+            row=row_idx,
+            column=5,
+            value=f"{s['days_present']} / {s['days_total']}",
+        ).font = H_CELL
+        unmarked_c = ws2.cell(row=row_idx, column=6, value=s["days_unmarked"])
+        unmarked_c.font = H_CELL
+        if s["days_unmarked"] > 0:
+            unmarked_c.fill = _fill(PALETTE["fill_gray"])
 
-    for col, width in enumerate([32, 28, 12, 18, 16, 18], start=1):
+    for col, width in enumerate([32, 14, 24, 14, 18, 18], start=1):
         ws2.column_dimensions[get_column_letter(col)].width = width
 
     buf = BytesIO()

@@ -1,12 +1,15 @@
 """Derive day-level attendance metrics from raw events.
 
-Pure functions — no DB, no IO. Used by both `/api/attendance/today` (M6) and
-the monthly Excel export (M7).
+Pure functions — no DB, no IO. Used by both `/api/attendance/today` and
+the monthly Excel export.
 
-Key design:
-  * Schedule lives on the employee row (`expected_arrival_time`,
-    `min_work_hours_per_day`). Derived metrics are computed on-read so
-    schedule edits propagate retroactively to dashboard + reports.
+V1.1: simplified. Real-life schedules at БЕК (waiters arrive any time,
+cooks swap shifts constantly) made the fixed `expected_arrival_time` /
+`min_work_hours_per_day` model meaningless, so we dropped them and the
+derived `late_minutes` / `early_leave_minutes`. What remains is the
+honest day shape: came_at, went_at, worked_hours, is_present.
+
+Key design (unchanged):
   * Cross-midnight shifts: events between 00:00 and `shift_day_cutoff_hour`
     (default 04:00) count toward the *previous* calendar day. A cook who
     arrives at 22:00 Mon and leaves at 03:30 Tue both belong to Mon's row.
@@ -16,15 +19,9 @@ Key design:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Iterable
 from zoneinfo import ZoneInfo
-
-
-@dataclass(frozen=True)
-class EmployeeSchedule:
-    expected_arrival_time: str  # "HH:MM"
-    min_work_hours_per_day: float
 
 
 @dataclass(frozen=True)
@@ -39,8 +36,6 @@ class DayMetrics:
     came_at: datetime | None  # local
     went_at: datetime | None  # local
     worked_hours: float
-    late_minutes: int
-    early_leave_minutes: int
 
 
 def _to_local(ts_utc: datetime, tz: ZoneInfo) -> datetime:
@@ -60,13 +55,7 @@ def shift_day_for(local_ts: datetime, cutoff_hour: int) -> date:
     return local_ts.date()
 
 
-def _parse_hhmm(s: str) -> dtime:
-    h, m = s.split(":")
-    return dtime(int(h), int(m))
-
-
 def derive_day_metrics(
-    schedule: EmployeeSchedule,
     events_for_day: Iterable[AttendanceEvent],
     *,
     tz_name: str,
@@ -75,14 +64,15 @@ def derive_day_metrics(
 ) -> DayMetrics:
     """Compute the metrics for a single (employee, shift-day) cell.
 
-    `events_for_day` must contain events that have already been bucketed into
-    the same shift day (caller's responsibility). Caller may also filter to
-    a target_day for sanity.
+    `events_for_day` must contain events already bucketed into the same
+    shift day (caller's responsibility). `target_day` is kept as a sanity
+    hint and reserved for future filtering; it has no effect today.
     """
+    del target_day  # reserved; kept for caller back-compat
+    del shift_day_cutoff_hour  # reserved; bucketing happens upstream
+
     tz = ZoneInfo(tz_name)
-    sorted_events = sorted(
-        events_for_day, key=lambda e: e.event_ts_utc
-    )
+    sorted_events = sorted(events_for_day, key=lambda e: e.event_ts_utc)
 
     came: datetime | None = None
     went: datetime | None = None
@@ -99,35 +89,17 @@ def derive_day_metrics(
             came_at=None,
             went_at=None,
             worked_hours=0.0,
-            late_minutes=0,
-            early_leave_minutes=0,
         )
-
-    expected = _parse_hhmm(schedule.expected_arrival_time)
-
-    late_minutes = 0
-    if came is not None:
-        expected_dt = datetime.combine(came.date(), expected)
-        diff = (came - expected_dt).total_seconds() / 60.0
-        late_minutes = max(0, int(round(diff)))
 
     worked_hours = 0.0
     if came is not None and went is not None and went > came:
         worked_hours = (went - came).total_seconds() / 3600.0
-
-    early_leave_minutes = 0
-    if came is not None and went is not None:
-        deficit = schedule.min_work_hours_per_day - worked_hours
-        if deficit > 0:
-            early_leave_minutes = int(round(deficit * 60))
 
     return DayMetrics(
         is_present=came is not None,
         came_at=came,
         went_at=went,
         worked_hours=round(worked_hours, 2),
-        late_minutes=late_minutes,
-        early_leave_minutes=early_leave_minutes,
     )
 
 

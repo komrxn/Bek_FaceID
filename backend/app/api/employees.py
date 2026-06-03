@@ -18,8 +18,6 @@ import asyncio
 import logging
 from typing import Annotated
 
-import cv2
-import numpy as np
 from fastapi import (
     APIRouter,
     Depends,
@@ -36,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import require_admin
 from app.core.executor import get_executor
 from app.core.face_engine import FaceEngine, embedding_to_blob
-from app.core.photo_storage import PhotoStorage
+from app.core.photo_storage import PhotoStorage, decode_image_with_exif
 from app.db import crud
 from app.db.models import Employee
 from app.db.schemas import EmployeeCreated, EmployeeListItem, EmployeeUpdate
@@ -50,7 +48,7 @@ router = APIRouter(
     dependencies=[Depends(require_admin)],
 )
 
-ARRIVAL_TIME_REGEX = r"^([01]\d|2[0-3]):[0-5]\d$"
+DEPARTMENT_REGEX = r"^(hall|kitchen|other)$"
 
 
 def _photo_url(photo_path: str | None) -> str | None:
@@ -62,10 +60,9 @@ def _to_list_item(emp: Employee) -> EmployeeListItem:
         id=emp.id,
         full_name=emp.full_name,
         position=emp.position,
+        department=emp.department,
         phone=emp.phone,
         photo_url=_photo_url(emp.photo_path),
-        expected_arrival_time=emp.expected_arrival_time,
-        min_work_hours_per_day=emp.min_work_hours_per_day,
         is_active=bool(emp.is_active),
         embeddings_count=len(emp.embeddings),
     )
@@ -76,10 +73,9 @@ def _to_created(emp: Employee, quality_scores: list[float]) -> EmployeeCreated:
         id=emp.id,
         full_name=emp.full_name,
         position=emp.position,
+        department=emp.department,
         phone=emp.phone,
         photo_url=_photo_url(emp.photo_path),
-        expected_arrival_time=emp.expected_arrival_time,
-        min_work_hours_per_day=emp.min_work_hours_per_day,
         is_active=bool(emp.is_active),
         photo_quality_scores=quality_scores,
     )
@@ -88,12 +84,20 @@ def _to_created(emp: Employee, quality_scores: list[float]) -> EmployeeCreated:
 def _detect_and_embed_blocking(
     engine: FaceEngine, raw_bytes: bytes
 ) -> tuple[bytes, float] | None:
-    """Decode JPEG, detect largest face, embed. Returns (blob, det_score) or None."""
-    arr = np.frombuffer(raw_bytes, dtype=np.uint8)
-    if arr.size == 0:
+    """Decode JPEG (respecting EXIF orientation), detect largest face, embed.
+
+    Returns (blob, det_score) or None.
+
+    EXIF orientation: phone cameras write the orientation as an EXIF tag
+    rather than rotating pixels. `decode_image_with_exif` applies the tag
+    so portrait shots arrive upright — both the face detector and the
+    saved JPEG see the same upright image.
+    """
+    if not raw_bytes:
         return None
-    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if bgr is None:
+    try:
+        _, bgr = decode_image_with_exif(raw_bytes)
+    except Exception:  # pragma: no cover — malformed file
         return None
     face = engine.detect_largest(bgr)
     if face is None:
@@ -133,8 +137,7 @@ async def get_endpoint(
 async def create_endpoint(
     full_name: Annotated[str, Form(min_length=1, max_length=255)],
     position: Annotated[str, Form(min_length=1, max_length=255)],
-    expected_arrival_time: Annotated[str, Form(pattern=ARRIVAL_TIME_REGEX)],
-    min_work_hours_per_day: Annotated[float, Form(gt=0, le=24)],
+    department: Annotated[str, Form(pattern=DEPARTMENT_REGEX)] = "hall",
     photos: list[UploadFile] = File(..., description="1–3 face photos"),
     phone: Annotated[str | None, Form()] = None,
     session: AsyncSession = Depends(get_db),
@@ -183,9 +186,8 @@ async def create_endpoint(
         session,
         full_name=full_name.strip(),
         position=position.strip(),
+        department=department,
         phone=phone.strip() if phone else None,
-        expected_arrival_time=expected_arrival_time,
-        min_work_hours_per_day=min_work_hours_per_day,
     )
 
     # 3) Persist each photo + embedding row in the same transaction.

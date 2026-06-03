@@ -42,6 +42,9 @@ class EmployeePublic(BaseModel):
 # ---- M2: admin-side employee schemas ----------------------------------------
 
 
+DEPARTMENT_PATTERN = r"^(hall|kitchen|other)$"
+
+
 class EmployeeListItem(BaseModel):
     """Row in the admin employees table."""
 
@@ -50,10 +53,9 @@ class EmployeeListItem(BaseModel):
     id: int
     full_name: str
     position: str
+    department: str
     phone: str | None
     photo_url: str | None
-    expected_arrival_time: str
-    min_work_hours_per_day: float
     is_active: bool
     embeddings_count: int
 
@@ -63,13 +65,12 @@ class EmployeeUpdate(BaseModel):
 
     full_name: str | None = None
     position: str | None = None
-    phone: str | None = None
-    expected_arrival_time: str | None = Field(
+    department: str | None = Field(
         None,
-        pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
-        description="HH:MM 24-hour, restaurant-local",
+        pattern=DEPARTMENT_PATTERN,
+        description="'hall' | 'kitchen' | 'other'",
     )
-    min_work_hours_per_day: float | None = Field(None, gt=0, le=24)
+    phone: str | None = None
     is_active: bool | None = None
 
 
@@ -81,10 +82,9 @@ class EmployeeCreated(BaseModel):
     id: int
     full_name: str
     position: str
+    department: str
     phone: str | None
     photo_url: str | None
-    expected_arrival_time: str
-    min_work_hours_per_day: float
     is_active: bool
     photo_quality_scores: list[float]  # per uploaded photo, in upload order
 
@@ -120,7 +120,6 @@ class AttendanceMarkResponse(BaseModel):
     event_id: int
     event_type: str
     event_ts: str
-    late_minutes: int = 0
 
 
 # ---- M6: dashboard schemas -------------------------------------------------
@@ -132,22 +131,19 @@ class AttendanceTodayRow(BaseModel):
     employee_id: int
     full_name: str
     position: str
+    department: str
     photo_url: str | None
-    expected_arrival_time: str
-    min_work_hours_per_day: float
     is_active: bool
     is_present: bool
     came_at: str | None
     went_at: str | None
     worked_hours: float
-    late_minutes: int
-    early_leave_minutes: int
 
 
 class AttendanceTodayResponse(BaseModel):
     shift_day: str  # ISO date
     rows: list[AttendanceTodayRow]
-    totals: dict[str, int]  # working_now, late, early_left, absent
+    totals: dict[str, int]  # working_now, completed, absent
 
 
 class AttendanceManualRequest(BaseModel):

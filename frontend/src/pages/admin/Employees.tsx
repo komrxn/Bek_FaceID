@@ -14,6 +14,7 @@ import {
   employeeListItemSchema,
   type EmployeeListItem,
 } from "@/lib/zod";
+import { DEPARTMENT_LABEL, DEPARTMENT_DOT } from "@/lib/department";
 import { spring } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 
@@ -192,14 +193,13 @@ export default function Employees() {
                     aria-label={emp.is_active ? "Деактивировать" : "Активировать"}
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-bek-border">
+                <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-bek-border">
                   <div className="flex flex-col">
-                    <div className="text-[11px] uppercase tracking-wider text-bek-textFaint">Приход</div>
-                    <div className="font-medium tabular-nums">{emp.expected_arrival_time}</div>
-                  </div>
-                  <div className="flex flex-col">
-                    <div className="text-[11px] uppercase tracking-wider text-bek-textFaint">Мин. часов</div>
-                    <div className="font-medium tabular-nums">{emp.min_work_hours_per_day} ч.</div>
+                    <div className="text-[11px] uppercase tracking-wider text-bek-textFaint">Отдел</div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className={cn("h-2 w-2 rounded-full", DEPARTMENT_DOT[emp.department])} />
+                      <span className="font-medium">{DEPARTMENT_LABEL[emp.department]}</span>
+                    </div>
                   </div>
                   <div className="flex flex-col">
                     <div className="text-[11px] uppercase tracking-wider text-bek-textFaint">Фото</div>
@@ -241,8 +241,7 @@ export default function Employees() {
               <thead>
                 <tr className="text-left text-label-caps text-bek-textMuted uppercase border-b border-bek-border">
                   <th className="px-4 py-3 font-semibold">Сотрудник</th>
-                  <th className="px-4 py-3 font-semibold">Приход</th>
-                  <th className="px-4 py-3 font-semibold">Мин. часов</th>
+                  <th className="px-4 py-3 font-semibold">Отдел</th>
                   <th className="px-4 py-3 font-semibold">Фото</th>
                   <th className="px-4 py-3 font-semibold">Активен</th>
                   <th className="px-4 py-3 font-semibold text-right">Действия</th>
@@ -279,8 +278,12 @@ export default function Employees() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 tabular-nums">{emp.expected_arrival_time}</td>
-                    <td className="px-4 py-3 tabular-nums">{emp.min_work_hours_per_day} ч.</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-2">
+                        <span className={cn("h-2 w-2 rounded-full", DEPARTMENT_DOT[emp.department])} />
+                        <span className="font-medium">{DEPARTMENT_LABEL[emp.department]}</span>
+                      </span>
+                    </td>
                     <td className="px-4 py-3 tabular-nums text-bek-textMuted">
                       {emp.embeddings_count}
                     </td>

@@ -5,9 +5,11 @@
  *   POST /api/employees → 1 round-trip (multipart with required photos).
  *
  * edit mode (employee given):
- *   PATCH /api/employees/{id}   → JSON: only changed schedule/profile fields.
+ *   PATCH /api/employees/{id}   → JSON: only changed profile fields.
  *   POST  /api/employees/{id}/photos → multipart: only if new photos picked.
  *   Both run in sequence; both 200 → close.
+ *
+ * V1.1: schedule fields dropped, department segmented control added.
  */
 
 import { useEffect, useState } from "react";
@@ -19,7 +21,6 @@ import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
-import { Slider } from "@/components/ui/Slider";
 import {
   Dialog,
   DialogContent,
@@ -34,16 +35,41 @@ import {
   employeeCreatedSchema,
   employeeFormSchema,
   employeeListItemSchema,
+  type Department,
   type EmployeeFormInput,
   type EmployeeListItem,
 } from "@/lib/zod";
+import {
+  DEPARTMENT_VALUES,
+  DEPARTMENT_LABEL,
+  DEPARTMENT_DESCRIPTION,
+} from "@/lib/department";
 import { spring } from "@/lib/motion";
+import { cn } from "@/lib/cn";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Pass to enter EDIT mode. Undefined = CREATE mode. */
   employee?: EmployeeListItem | null;
+}
+
+const EMPTY_DEFAULTS: EmployeeFormInput = {
+  full_name: "",
+  position: "",
+  department: "hall",
+  phone: "",
+};
+
+function defaultsFor(employee: EmployeeListItem | null | undefined): EmployeeFormInput {
+  return employee
+    ? {
+        full_name: employee.full_name,
+        position: employee.position,
+        department: employee.department,
+        phone: employee.phone ?? "",
+      }
+    : EMPTY_DEFAULTS;
 }
 
 export function EmployeeForm({ open, onOpenChange, employee }: Props) {
@@ -62,43 +88,13 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
     formState: { errors, isSubmitting, isDirty },
   } = useForm<EmployeeFormInput>({
     resolver: zodResolver(employeeFormSchema),
-    defaultValues: employee
-      ? {
-          full_name: employee.full_name,
-          position: employee.position,
-          phone: employee.phone ?? "",
-          expected_arrival_time: employee.expected_arrival_time,
-          min_work_hours_per_day: employee.min_work_hours_per_day,
-        }
-      : {
-          full_name: "",
-          position: "",
-          phone: "",
-          expected_arrival_time: "09:00",
-          min_work_hours_per_day: 8,
-        },
+    defaultValues: defaultsFor(employee),
   });
 
   // Re-seed defaults when switching between employees (or create→edit).
   useEffect(() => {
     if (open) {
-      reset(
-        employee
-          ? {
-              full_name: employee.full_name,
-              position: employee.position,
-              phone: employee.phone ?? "",
-              expected_arrival_time: employee.expected_arrival_time,
-              min_work_hours_per_day: employee.min_work_hours_per_day,
-            }
-          : {
-              full_name: "",
-              position: "",
-              phone: "",
-              expected_arrival_time: "09:00",
-              min_work_hours_per_day: 8,
-            }
-      );
+      reset(defaultsFor(employee));
       setPhotos([]);
       setBadIndices([]);
       setPhotoError(null);
@@ -108,16 +104,15 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
   const submit = useMutation({
     mutationFn: async (values: EmployeeFormInput) => {
       if (isEdit) {
-        // 1) Patch profile/schedule (always run — backend ignores unchanged).
+        // 1) Patch profile (always run — backend ignores unchanged).
         await api({
           method: "PATCH",
           path: `/api/employees/${employee!.id}`,
           body: {
             full_name: values.full_name,
             position: values.position,
+            department: values.department,
             phone: values.phone || null,
-            expected_arrival_time: values.expected_arrival_time,
-            min_work_hours_per_day: values.min_work_hours_per_day,
           },
           schema: employeeListItemSchema,
         });
@@ -139,9 +134,8 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
       const fd = new FormData();
       fd.append("full_name", values.full_name);
       fd.append("position", values.position);
+      fd.append("department", values.department);
       if (values.phone) fd.append("phone", values.phone);
-      fd.append("expected_arrival_time", values.expected_arrival_time);
-      fd.append("min_work_hours_per_day", String(values.min_work_hours_per_day));
       for (const f of photos) fd.append("photos", f);
       return api({
         method: "POST",
@@ -180,7 +174,7 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
   const title = isEdit ? "Редактировать сотрудника" : "Добавить сотрудника";
   const subtitle = isEdit
     ? "Можно изменить любые поля и при желании добавить новые фотографии."
-    : "Имя, должность, расписание и 1–3 чёткие фотографии лица.";
+    : "Имя, должность, отдел и 1–3 чёткие фотографии лица.";
   const submitLabel = isEdit ? "Сохранить" : "Создать";
 
   // In edit mode submit is enabled if either profile fields changed OR new photos picked.
@@ -211,7 +205,7 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="position">Должность</Label>
-              <Input id="position" placeholder="Управляющий" {...register("position")} />
+              <Input id="position" placeholder="Официант" {...register("position")} />
               {errors.position && (
                 <p className="text-body-sm text-bek-red">{errors.position.message}</p>
               )}
@@ -222,43 +216,46 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
               <Input id="phone" placeholder="+998 90 123 45 67" {...register("phone")} />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="expected_arrival_time">Время прихода</Label>
-              <Input
-                id="expected_arrival_time"
-                type="time"
-                step={60}
-                {...register("expected_arrival_time")}
-              />
-              {errors.expected_arrival_time && (
-                <p className="text-body-sm text-bek-red">
-                  {errors.expected_arrival_time.message}
-                </p>
-              )}
-            </div>
-
             <Controller
               control={control}
-              name="min_work_hours_per_day"
+              name="department"
               render={({ field }) => (
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-baseline justify-between">
-                    <Label>Минимум часов в день</Label>
-                    <span className="text-body-md font-semibold tabular-nums">
-                      {field.value} ч.
-                    </span>
+                <div className="flex flex-col gap-1.5 sm:col-span-2">
+                  <Label>Отдел</Label>
+                  <div
+                    role="radiogroup"
+                    aria-label="Отдел"
+                    className="grid grid-cols-3 gap-2 rounded-xl bg-bek-surface2 p-1"
+                  >
+                    {DEPARTMENT_VALUES.map((dept) => {
+                      const selected = field.value === dept;
+                      return (
+                        <button
+                          key={dept}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          onClick={() => field.onChange(dept satisfies Department)}
+                          className={cn(
+                            "flex flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left transition-all",
+                            "focus-visible:ring-2 focus-visible:ring-bek-indigo/40 focus-visible:ring-offset-2",
+                            selected
+                              ? "bg-white text-bek-text shadow-sm"
+                              : "text-bek-textMuted hover:text-bek-text"
+                          )}
+                        >
+                          <span className="text-body-md font-semibold">
+                            {DEPARTMENT_LABEL[dept]}
+                          </span>
+                          <span className="text-body-sm text-bek-textMuted leading-tight">
+                            {DEPARTMENT_DESCRIPTION[dept]}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                  <Slider
-                    min={1}
-                    max={14}
-                    step={0.5}
-                    value={[field.value]}
-                    onValueChange={(v) => field.onChange(v[0])}
-                  />
-                  {errors.min_work_hours_per_day && (
-                    <p className="text-body-sm text-bek-red">
-                      {errors.min_work_hours_per_day.message}
-                    </p>
+                  {errors.department && (
+                    <p className="text-body-sm text-bek-red">{errors.department.message}</p>
                   )}
                 </div>
               )}

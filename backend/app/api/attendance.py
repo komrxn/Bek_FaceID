@@ -21,8 +21,6 @@ from app.api.auth import require_admin
 from app.config import Settings, get_settings
 from app.core.attendance_metrics import (
     AttendanceEvent as MetricsEvent,
-    EmployeeSchedule,
-    bucket_events_by_shift_day,
     derive_day_metrics,
     shift_day_for,
 )
@@ -130,35 +128,10 @@ async def mark(
         row.id,
     )
 
-    # Inline late computation — single-event view; full day metrics are
-    # computed by /today endpoint.
-    late_minutes = 0
-    if payload.event_type == "came":
-        emp = await crud.get_employee(session, event.employee_id)
-        if emp is not None:
-            schedule = EmployeeSchedule(
-                expected_arrival_time=emp.expected_arrival_time,
-                min_work_hours_per_day=emp.min_work_hours_per_day,
-            )
-            local_dt = (
-                row.event_ts.replace(tzinfo=ZoneInfo("UTC")).astimezone(
-                    ZoneInfo(settings.restaurant_tz)
-                )
-            )
-            metrics = derive_day_metrics(
-                schedule,
-                [MetricsEvent(event_type="came", event_ts_utc=row.event_ts)],
-                tz_name=settings.restaurant_tz,
-                shift_day_cutoff_hour=settings.shift_day_cutoff_hour,
-                target_day=local_dt.date(),
-            )
-            late_minutes = metrics.late_minutes
-
     return AttendanceMarkResponse(
         event_id=row.id,
         event_type=row.event_type,
         event_ts=row.event_ts.isoformat(),
-        late_minutes=late_minutes,
     )
 
 
@@ -201,19 +174,14 @@ async def today(
         by_employee.setdefault(ev.employee_id, []).append(ev)
 
     rows: list[AttendanceTodayRow] = []
-    totals = {"working_now": 0, "late": 0, "early_left": 0, "absent": 0}
+    totals = {"working_now": 0, "completed": 0, "absent": 0}
 
     for emp in employees:
-        schedule = EmployeeSchedule(
-            expected_arrival_time=emp.expected_arrival_time,
-            min_work_hours_per_day=emp.min_work_hours_per_day,
-        )
         emp_events = [
             MetricsEvent(event_type=e.event_type, event_ts_utc=e.event_ts)
             for e in by_employee.get(emp.id, [])
         ]
         metrics = derive_day_metrics(
-            schedule,
             emp_events,
             tz_name=settings.restaurant_tz,
             shift_day_cutoff_hour=settings.shift_day_cutoff_hour,
@@ -221,11 +189,9 @@ async def today(
 
         if metrics.is_present and metrics.went_at is None:
             totals["working_now"] += 1
-        if metrics.late_minutes > 0:
-            totals["late"] += 1
-        if metrics.early_leave_minutes > 0:
-            totals["early_left"] += 1
-        if not metrics.is_present:
+        elif metrics.is_present and metrics.went_at is not None:
+            totals["completed"] += 1
+        else:
             totals["absent"] += 1
 
         rows.append(
@@ -233,30 +199,25 @@ async def today(
                 employee_id=emp.id,
                 full_name=emp.full_name,
                 position=emp.position,
+                department=emp.department,
                 photo_url=(
                     f"/static/employee_photos/{emp.photo_path}" if emp.photo_path else None
                 ),
-                expected_arrival_time=emp.expected_arrival_time,
-                min_work_hours_per_day=emp.min_work_hours_per_day,
                 is_active=bool(emp.is_active),
                 is_present=metrics.is_present,
                 came_at=metrics.came_at.isoformat() if metrics.came_at else None,
                 went_at=metrics.went_at.isoformat() if metrics.went_at else None,
                 worked_hours=metrics.worked_hours,
-                late_minutes=metrics.late_minutes,
-                early_leave_minutes=metrics.early_leave_minutes,
             )
         )
 
-    # Stable, useful ordering: present-without-leave first, then late, then on-time, then absent.
+    # Ordering: working-now first (by name), completed second, absent last.
     def _sort_key(r: AttendanceTodayRow) -> tuple[int, str]:
         if r.is_present and r.went_at is None:
             return (0, r.full_name.lower())
-        if r.late_minutes > 0:
-            return (1, r.full_name.lower())
         if r.is_present:
-            return (2, r.full_name.lower())
-        return (3, r.full_name.lower())
+            return (1, r.full_name.lower())
+        return (2, r.full_name.lower())
 
     rows.sort(key=_sort_key)
     today_local_date = (
@@ -315,5 +276,4 @@ async def manual(
         event_id=row.id,
         event_type=row.event_type,
         event_ts=row.event_ts.isoformat(),
-        late_minutes=0,
     )

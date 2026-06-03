@@ -1,17 +1,35 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Activity, Clock, LogOut, MoonStar, Users2 } from "lucide-react";
+import { Activity, CheckCircle2, MoonStar, Users2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { DayStatusPill } from "@/components/app/DayStatusPill";
 import { StatsTile } from "@/components/app/StatsTile";
 import { api } from "@/lib/api";
-import { attendanceTodayResponseSchema, type AttendanceTodayRow } from "@/lib/zod";
+import { attendanceTodayResponseSchema, type AttendanceTodayRow, type Department } from "@/lib/zod";
+import { DEPARTMENT_LABEL, DEPARTMENT_DOT } from "@/lib/department";
 import { formatDate, formatTime } from "@/lib/intl";
 import { spring } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 
+type DeptFilter = Department | "all";
+const FILTER_VALUES: DeptFilter[] = ["all", "hall", "kitchen", "other"];
+const FILTER_LABEL: Record<DeptFilter, string> = {
+  all: "Все",
+  hall: DEPARTMENT_LABEL.hall,
+  kitchen: DEPARTMENT_LABEL.kitchen,
+  other: DEPARTMENT_LABEL.other,
+};
+
+function parseFilter(raw: string | null): DeptFilter {
+  return raw === "hall" || raw === "kitchen" || raw === "other" ? raw : "all";
+}
+
 export default function Attendance() {
+  const [params, setParams] = useSearchParams();
+  const filter = parseFilter(params.get("dept"));
+
   const q = useQuery({
     queryKey: ["attendance", "today"],
     queryFn: () =>
@@ -25,6 +43,22 @@ export default function Attendance() {
     [q.data]
   );
 
+  const visibleRows = useMemo(() => {
+    if (!q.data) return [];
+    if (filter === "all") return q.data.rows;
+    return q.data.rows.filter((r) => r.department === filter);
+  }, [q.data, filter]);
+
+  const setFilter = (next: DeptFilter) => {
+    const nextParams = new URLSearchParams(params);
+    if (next === "all") {
+      nextParams.delete("dept");
+    } else {
+      nextParams.set("dept", next);
+    }
+    setParams(nextParams, { replace: true });
+  };
+
   return (
     <div className="flex flex-col gap-5 sm:gap-6">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
@@ -34,32 +68,58 @@ export default function Attendance() {
         </div>
       </div>
 
-      {/* Stats tiles — 2x2 on mobile, 4 in a row on desktop */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      {/* Stats tiles — 3 honest states */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <StatsTile
-          label="Работают"
+          label="Работают сейчас"
           value={totals?.working_now ?? "—"}
           tone="green"
           icon={<Activity className="h-5 w-5" strokeWidth={1.75} />}
         />
         <StatsTile
-          label="Опоздали"
-          value={totals?.late ?? "—"}
-          tone="amber"
-          icon={<Clock className="h-5 w-5" strokeWidth={1.75} />}
+          label="Отработали"
+          value={totals?.completed ?? "—"}
+          tone="indigo"
+          icon={<CheckCircle2 className="h-5 w-5" strokeWidth={1.75} />}
         />
         <StatsTile
-          label="Ушли раньше"
-          value={totals?.early_left ?? "—"}
-          tone="red"
-          icon={<LogOut className="h-5 w-5" strokeWidth={1.75} />}
-        />
-        <StatsTile
-          label="Отсутствуют"
+          label="Не отметились"
           value={totals?.absent ?? "—"}
           tone="neutral"
           icon={<MoonStar className="h-5 w-5" strokeWidth={1.75} />}
         />
+      </div>
+
+      {/* Department filter */}
+      <div
+        role="tablist"
+        aria-label="Фильтр по отделу"
+        className="flex flex-wrap gap-1.5 rounded-xl bg-bek-surface2 p-1 self-start"
+      >
+        {FILTER_VALUES.map((f) => {
+          const active = f === filter;
+          return (
+            <button
+              key={f}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setFilter(f)}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-body-sm font-medium transition-all",
+                "focus-visible:ring-2 focus-visible:ring-bek-indigo/40 focus-visible:ring-offset-2",
+                active
+                  ? "bg-white text-bek-text shadow-sm"
+                  : "text-bek-textMuted hover:text-bek-text"
+              )}
+            >
+              {f !== "all" && (
+                <span className={cn("h-2 w-2 rounded-full", DEPARTMENT_DOT[f])} />
+              )}
+              {FILTER_LABEL[f]}
+            </button>
+          );
+        })}
       </div>
 
       {/* States */}
@@ -71,40 +131,41 @@ export default function Attendance() {
           Не удалось загрузить таблицу.
         </Card>
       )}
-      {q.isSuccess && q.data.rows.length === 0 && (
+      {q.isSuccess && visibleRows.length === 0 && (
         <Card className="p-12 text-center text-bek-textMuted flex flex-col items-center gap-3">
           <Users2 className="h-7 w-7 text-bek-textFaint" strokeWidth={1.75} />
-          Сегодня ещё никто не отметился.
+          {filter === "all"
+            ? "В системе ещё нет сотрудников. Добавьте первого в разделе «Сотрудники»."
+            : "Никого нет в этом отделе."}
         </Card>
       )}
 
       {/* Mobile: cards */}
-      {q.isSuccess && q.data.rows.length > 0 && (
+      {q.isSuccess && visibleRows.length > 0 && (
         <div className="md:hidden flex flex-col gap-3">
-          {q.data.rows.map((r, idx) => (
+          {visibleRows.map((r, idx) => (
             <MobileAttendanceCard key={r.employee_id} row={r} index={idx} />
           ))}
         </div>
       )}
 
       {/* Desktop: table */}
-      {q.isSuccess && q.data.rows.length > 0 && (
+      {q.isSuccess && visibleRows.length > 0 && (
         <Card className="hidden md:block overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px]">
+            <table className="w-full min-w-[760px]">
               <thead>
                 <tr className="text-left text-label-caps uppercase text-bek-textMuted border-b border-bek-border">
                   <th className="px-4 py-3 font-semibold">Сотрудник</th>
+                  <th className="px-4 py-3 font-semibold">Отдел</th>
                   <th className="px-4 py-3 font-semibold">Пришёл</th>
                   <th className="px-4 py-3 font-semibold">Ушёл</th>
                   <th className="px-4 py-3 font-semibold">Часов</th>
-                  <th className="px-4 py-3 font-semibold">Опозд.</th>
-                  <th className="px-4 py-3 font-semibold">Ранний</th>
                   <th className="px-4 py-3 font-semibold text-right">Статус</th>
                 </tr>
               </thead>
               <tbody>
-                {q.data.rows.map((r, idx) => (
+                {visibleRows.map((r, idx) => (
                   <motion.tr
                     key={r.employee_id}
                     initial={{ opacity: 0, y: 4 }}
@@ -131,6 +192,12 @@ export default function Attendance() {
                         </div>
                       </div>
                     </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-2">
+                        <span className={cn("h-2 w-2 rounded-full", DEPARTMENT_DOT[r.department])} />
+                        <span className="font-medium">{DEPARTMENT_LABEL[r.department]}</span>
+                      </span>
+                    </td>
                     <td className="px-4 py-3 tabular-nums">
                       {r.came_at ? formatTime(r.came_at) : <span className="text-bek-textFaint">—</span>}
                     </td>
@@ -140,27 +207,8 @@ export default function Attendance() {
                     <td className="px-4 py-3 tabular-nums">
                       {r.worked_hours > 0 ? `${r.worked_hours.toFixed(1)} ч.` : <span className="text-bek-textFaint">—</span>}
                     </td>
-                    <td className="px-4 py-3 tabular-nums">
-                      {r.late_minutes > 0 ? (
-                        <span className="text-bek-amber font-medium">{r.late_minutes} мин</span>
-                      ) : (
-                        <span className="text-bek-textFaint">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums">
-                      {r.early_leave_minutes > 0 ? (
-                        <span className="text-bek-red font-medium">{r.early_leave_minutes} мин</span>
-                      ) : (
-                        <span className="text-bek-textFaint">—</span>
-                      )}
-                    </td>
                     <td className="px-4 py-3 text-right">
-                      <DayStatusPill
-                        isPresent={r.is_present}
-                        wentAt={r.went_at}
-                        lateMinutes={r.late_minutes}
-                        earlyLeaveMinutes={r.early_leave_minutes}
-                      />
+                      <DayStatusPill isPresent={r.is_present} wentAt={r.went_at} />
                     </td>
                   </motion.tr>
                 ))}
@@ -196,13 +244,12 @@ function MobileAttendanceCard({ row: r, index }: { row: AttendanceTodayRow; inde
           <div className="flex flex-col leading-tight min-w-0 flex-1">
             <div className="font-semibold truncate">{r.full_name}</div>
             <div className="text-body-sm text-bek-textMuted truncate">{r.position}</div>
+            <div className="mt-1 inline-flex items-center gap-1.5 text-body-sm">
+              <span className={cn("h-1.5 w-1.5 rounded-full", DEPARTMENT_DOT[r.department])} />
+              <span className="text-bek-textMuted">{DEPARTMENT_LABEL[r.department]}</span>
+            </div>
           </div>
-          <DayStatusPill
-            isPresent={r.is_present}
-            wentAt={r.went_at}
-            lateMinutes={r.late_minutes}
-            earlyLeaveMinutes={r.early_leave_minutes}
-          />
+          <DayStatusPill isPresent={r.is_present} wentAt={r.went_at} />
         </div>
         <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-bek-border">
           <Cell label="Пришёл" value={r.came_at ? formatTime(r.came_at) : "—"} />
@@ -212,16 +259,6 @@ function MobileAttendanceCard({ row: r, index }: { row: AttendanceTodayRow; inde
             value={r.worked_hours > 0 ? `${r.worked_hours.toFixed(1)} ч.` : "—"}
           />
         </div>
-        {(r.late_minutes > 0 || r.early_leave_minutes > 0) && (
-          <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-bek-border text-body-sm">
-            {r.late_minutes > 0 && (
-              <span className="text-bek-amber">Опозд. <span className="font-semibold tabular-nums">{r.late_minutes} мин</span></span>
-            )}
-            {r.early_leave_minutes > 0 && (
-              <span className="text-bek-red">Ранний уход <span className="font-semibold tabular-nums">{r.early_leave_minutes} мин</span></span>
-            )}
-          </div>
-        )}
       </Card>
     </motion.div>
   );

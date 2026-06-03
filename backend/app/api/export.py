@@ -17,10 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import require_admin
 from app.config import Settings, get_settings
-from app.core.attendance_metrics import (
-    AttendanceEvent as MetricsEvent,
-    EmployeeSchedule,
-)
+from app.core.attendance_metrics import AttendanceEvent as MetricsEvent
 from app.core.excel_report import EmployeeForReport, build_xlsx
 from app.db import crud
 from app.db.models import AttendanceEvent
@@ -80,10 +77,7 @@ async def export_xlsx(
             id=e.id,
             full_name=e.full_name,
             position=e.position,
-            schedule=EmployeeSchedule(
-                expected_arrival_time=e.expected_arrival_time,
-                min_work_hours_per_day=e.min_work_hours_per_day,
-            ),
+            department=e.department,
         )
         for e in employees
     ]

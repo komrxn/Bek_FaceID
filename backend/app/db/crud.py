@@ -37,16 +37,14 @@ async def create_employee(
     *,
     full_name: str,
     position: str,
+    department: str,
     phone: str | None,
-    expected_arrival_time: str,
-    min_work_hours_per_day: float,
 ) -> Employee:
     emp = Employee(
         full_name=full_name,
         position=position,
+        department=department,
         phone=phone,
-        expected_arrival_time=expected_arrival_time,
-        min_work_hours_per_day=min_work_hours_per_day,
         is_active=1,
     )
     session.add(emp)

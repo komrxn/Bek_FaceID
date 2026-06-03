@@ -82,15 +82,15 @@ export default function Export() {
         </CardHeader>
         <CardContent className="text-body-md text-bek-textMuted flex flex-col gap-2">
           <p>
-            <span className="text-bek-green font-medium">Зелёная</span> ячейка — пришёл вовремя
-            и отработал минимум часов.
-            {" "}<span className="text-bek-amber font-medium">Жёлтая</span> — опоздание.
-            {" "}<span className="text-bek-red font-medium">Красная</span> — ранний уход.
-            {" "}<span className="font-medium">Серая</span> — отсутствовал.
+            <span className="text-bek-green font-medium">Зелёная</span> ячейка — отработал
+            (пришёл и ушёл).
+            {" "}<span className="text-bek-indigo font-medium">Синяя</span> — сейчас на смене
+            (пришёл, ещё не ушёл).
+            {" "}<span className="font-medium">Серая</span> — «не отметился».
           </p>
           <p>
-            Лист «Сводка» содержит итоги по каждому сотруднику: всего часов, дней
-            присутствия, минут опоздания и минут раннего ухода.
+            Лист «Сводка» содержит итоги по каждому сотруднику: отдел, должность,
+            всего часов за месяц, сколько дней отработал и сколько дней не отметился.
           </p>
         </CardContent>
       </Card>

@@ -5,12 +5,13 @@ interface Props {
   label: string;
   value: number | string;
   hint?: string;
-  tone?: "neutral" | "green" | "amber" | "red";
+  tone?: "neutral" | "green" | "amber" | "red" | "indigo";
   icon?: React.ReactNode;
 }
 
 const TONE_BG: Record<NonNullable<Props["tone"]>, string> = {
-  neutral: "bg-bek-surfaceIndigo text-bek-indigo",
+  neutral: "bg-bek-surface2 text-bek-textMuted",
+  indigo:  "bg-bek-surfaceIndigo text-bek-indigo",
   green:   "bg-bek-surfaceGreen text-bek-green",
   amber:   "bg-bek-amberSoft text-bek-amber",
   red:     "bg-bek-surfaceRed text-bek-red",

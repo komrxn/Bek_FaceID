@@ -3,11 +3,15 @@
 See ~/.claude/plans/zesty-doodling-elephant.md §Database schema for the
 canonical specification. Notable decisions:
 
-  * `expected_arrival_time` is TEXT "HH:MM" in restaurant-local time
-    (RESTAURANT_TZ, default Asia/Tashkent). `derive_day_metrics` (M6)
-    composes it with the day's events.
-  * `min_work_hours_per_day` is REAL hours (e.g. 8.0). Derived
-    `early_leave_minutes = max(0, (min_hours - worked) * 60)` — never stored.
+  * `department` is one of 'hall' | 'kitchen' | 'other'. It's the
+    structured axis for filtering / grouping on the attendance dashboard;
+    the free-text `position` continues to hold the specific role
+    (Официант / Повар / Бармен / Управляющий / etc.).
+  * Schedule fields (`expected_arrival_time`, `min_work_hours_per_day`)
+    were dropped in V1.1: real schedules at БЕК change too often for the
+    fixed-per-employee model to be meaningful, and the derived
+    "опоздание" / "ранний уход" metrics were noise. The dashboard now
+    shows only came_at / went_at / worked_hours / "не отметился".
   * `attendance_events.notes` is added (vs the original plan) for the
     `POST /api/attendance/manual` flow where an admin overrides reality.
   * Embeddings are stored as BLOB (512 × float32 = 2048 bytes per row).
@@ -55,17 +59,12 @@ class Employee(Base):
         nullable=True,
         comment="Relative path to primary display photo under data/employee_photos/",
     )
-    expected_arrival_time: Mapped[str] = mapped_column(
-        String(5),  # "HH:MM"
+    department: Mapped[str] = mapped_column(
+        String(16),
         nullable=False,
-        default="09:00",
-        server_default="09:00",
-    )
-    min_work_hours_per_day: Mapped[float] = mapped_column(
-        Float,
-        nullable=False,
-        default=8.0,
-        server_default="8.0",
+        default="hall",
+        server_default="hall",
+        comment="'hall' | 'kitchen' | 'other' — structured axis for filtering",
     )
     is_active: Mapped[bool] = mapped_column(
         Integer,  # SQLite has no bool; 0/1
