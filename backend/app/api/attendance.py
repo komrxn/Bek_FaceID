@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -27,7 +27,7 @@ from app.core.attendance_metrics import (
 from app.core.debounce import Debouncer
 from app.core.pending_tokens import PendingTokens
 from app.db import crud
-from app.db.models import AttendanceEvent, Employee
+from app.db.models import AttendanceEvent
 from app.db.schemas import (
     AttendanceManualRequest,
     AttendanceMarkRequest,
