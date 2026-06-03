@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import (
@@ -29,6 +30,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import require_admin
@@ -36,7 +38,7 @@ from app.core.executor import get_executor
 from app.core.face_engine import FaceEngine, embedding_to_blob
 from app.core.photo_storage import PhotoStorage, decode_image_with_exif
 from app.db import crud
-from app.db.models import Employee
+from app.db.models import AttendanceEvent, Employee
 from app.db.schemas import EmployeeCreated, EmployeeListItem, EmployeeUpdate
 from app.deps import get_db, get_face_engine, get_photo_storage
 
@@ -260,6 +262,9 @@ async def patch_endpoint(
     return _to_list_item(emp)
 
 
+TOMBSTONE_PREFIX = "[удалён] "
+
+
 @router.delete(
     "/{employee_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -272,26 +277,60 @@ async def delete_endpoint(
     engine: FaceEngine = Depends(get_face_engine),
     storage: PhotoStorage = Depends(get_photo_storage),
 ) -> Response:
-    """Default: soft-delete (deactivate, keep history). `?hard=true` wipes
-    the employee row + embeddings + photos. Attendance events remain (their
-    FK is non-cascading) for audit, but the employee is no longer listed."""
+    """Default: soft-delete (deactivate, keep history).
+    `?hard=true` wipes everything the manager would expect to be wiped
+    (photos, embeddings, list visibility) but, if the employee already
+    has attendance events, keeps a tombstone row so the FK on those
+    audit events still resolves. The tombstone is renamed `[удалён] …`
+    + is_active=0 so it never shows in any default view (the
+    `list_employees` query filters tombstones out)."""
     emp = await crud.get_employee(session, employee_id)
     if emp is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
 
     if hard:
-        # Embeddings cascade on FK; attendance events keep emp_id but the
-        # employee row is gone.
         emp_id = emp.id
+        emp_name = emp.full_name
+
+        # Count attendance events FIRST — branch decides hard-delete vs tombstone.
+        event_count = await session.scalar(
+            select(func.count(AttendanceEvent.id)).where(
+                AttendanceEvent.employee_id == emp_id
+            )
+        ) or 0
+
+        if event_count > 0:
+            # Tombstone path: history of came/went events exists; SQLite would
+            # refuse a real DELETE because attendance_events.employee_id has a
+            # non-cascading FK. Wipe the visible person, keep the audit anchor.
+            for emb in list(emp.embeddings):
+                await session.delete(emb)
+            if not emp.full_name.startswith(TOMBSTONE_PREFIX):
+                emp.full_name = f"{TOMBSTONE_PREFIX}{emp.full_name}"
+            emp.photo_path = None
+            emp.is_active = 0
+            emp.deactivated_at = datetime.now(UTC).replace(tzinfo=None)
+            await session.commit()
+            try:
+                storage.delete(emp_id)
+            except Exception as exc:  # pragma: no cover — best-effort
+                logger.warning("[employees] tombstone photos failed: %s", exc)
+            await _rebuild_index_from_db(session, engine)
+            logger.info(
+                "[employees] TOMBSTONED emp_id=%s (%r) — kept %d audit events",
+                emp_id, emp_name, event_count,
+            )
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+        # No events — safe to drop the row entirely.
         await session.delete(emp)
         await session.commit()
-        # Clean photo directory off-disk (best effort).
         try:
             storage.delete(emp_id)
         except Exception as exc:  # pragma: no cover
             logger.warning("[employees] delete photos failed: %s", exc)
         await _rebuild_index_from_db(session, engine)
-        logger.info("[employees] HARD-deleted emp_id=%s", emp_id)
+        logger.info("[employees] HARD-deleted emp_id=%s (%r) — no events", emp_id, emp_name)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     await crud.deactivate_employee(session, emp)

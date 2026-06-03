@@ -59,7 +59,10 @@ async def export_xlsx(
     utc_start = local_start.replace(tzinfo=tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     utc_end = local_end.replace(tzinfo=tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
-    employees = await crud.list_employees(session)  # active + inactive both
+    # Tombstoned employees (renamed "[удалён] X" by hard-delete) must still
+    # appear in historical Excel reports so the events tied to their id don't
+    # disappear from past months.
+    employees = await crud.list_employees(session, include_tombstoned=True)
     events_res = await session.execute(
         select(AttendanceEvent)
         .where(AttendanceEvent.event_ts >= utc_start)

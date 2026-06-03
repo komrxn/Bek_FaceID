@@ -18,12 +18,26 @@ from app.db.models import AdminUser, AttendanceEvent, Employee, FaceEmbedding
 # ---------------------------- Employees ----------------------------
 
 
+TOMBSTONE_PREFIX = "[удалён] "
+
+
 async def list_employees(
-    session: AsyncSession, *, only_active: bool = False
+    session: AsyncSession,
+    *,
+    only_active: bool = False,
+    include_tombstoned: bool = False,
 ) -> list[Employee]:
+    """List employees ordered by name. By default, hides tombstones
+    (rows with `full_name LIKE '[удалён] %'` — produced by hard-delete
+    when attendance history blocks a full DELETE). Pass
+    `include_tombstoned=True` only when you explicitly need them
+    (e.g. monthly Excel of a past period when the employee was still
+    active)."""
     stmt = select(Employee).order_by(Employee.full_name.asc())
     if only_active:
         stmt = stmt.where(Employee.is_active == 1)
+    if not include_tombstoned:
+        stmt = stmt.where(Employee.full_name.not_like(f"{TOMBSTONE_PREFIX}%"))
     res = await session.execute(stmt)
     return list(res.scalars().all())
 
