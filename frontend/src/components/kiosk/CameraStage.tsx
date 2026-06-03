@@ -13,10 +13,15 @@ import { spring } from "@/lib/motion";
 interface Props {
   videoRef: RefObject<HTMLVideoElement>;
   active: boolean;
+  /** When false, do NOT render the <video> element at all. Some WebViews
+   *  (notably Android system WebView) render a default "press play" overlay
+   *  on a `<video>` element that has no stream, which on the kiosk's idle
+   *  screen looks like a circle-with-triangle icon. Unmounting prevents that. */
+  mounted?: boolean;
   caption?: string;
 }
 
-export function CameraStage({ videoRef, active, caption }: Props) {
+export function CameraStage({ videoRef, active, mounted = true, caption }: Props) {
   return (
     <motion.div
       initial={false}
@@ -26,13 +31,19 @@ export function CameraStage({ videoRef, active, caption }: Props) {
                  rounded-[28px] sm:rounded-[36px] lg:rounded-[44px]
                  border border-bek-darkBorder shadow-2xl bg-black/70"
     >
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        className="absolute inset-0 w-full h-full object-cover -scale-x-100"
-      />
+      {mounted && (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          // `poster` set to a 1×1 transparent PNG so the WebView never shows its
+          // default media-control overlay (the "play triangle" placeholder)
+          // during the moment between mount and first frame.
+          poster="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII="
+          className="absolute inset-0 w-full h-full object-cover -scale-x-100"
+        />
+      )}
       {/* Soft vignette */}
       <div
         aria-hidden

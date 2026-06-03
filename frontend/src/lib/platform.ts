@@ -35,6 +35,23 @@ export function apiBase(): string {
 }
 
 /**
+ * Resolve a relative media URL (e.g. `/static/employee_photos/12/abc.jpg`)
+ * for `<img src>` / `<a href>` — same trick as `apiBase()` but for assets
+ * served by FastAPI's StaticFiles mount.
+ *
+ * On web this is a no-op (returns the relative URL — nginx serves it from
+ * the same origin). On native the WebView origin is `https://localhost`,
+ * so the relative path would resolve to a 404 inside the APK's bundle.
+ */
+export function mediaUrl(
+  path: string | null | undefined
+): string | null {
+  if (!path) return null;
+  if (/^(https?:|data:|blob:)/.test(path)) return path; // already absolute
+  return `${apiBase()}${path}`;
+}
+
+/**
  * Run once at app startup (called from `main.tsx`) — sets up the kiosk
  * experience on Android. No-op on the web.
  *

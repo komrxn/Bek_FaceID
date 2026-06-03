@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { LogIn, LogOut } from "lucide-react";
 import { spring } from "@/lib/motion";
 import { formatTime } from "@/lib/intl";
+import { mediaUrl } from "@/lib/platform";
 import type { EmployeePublic, LastEventToday } from "@/lib/zod";
 
 interface Props {
@@ -39,7 +40,7 @@ export function RecognitionCard({
       >
         {employee.photo_url ? (
           <img
-            src={employee.photo_url}
+            src={mediaUrl(employee.photo_url) ?? ""}
             alt={employee.full_name}
             className="w-28 h-28 sm:w-36 sm:h-36 lg:w-44 lg:h-44 object-cover mask-squircle ring-4 ring-white/15 shadow-2xl"
           />

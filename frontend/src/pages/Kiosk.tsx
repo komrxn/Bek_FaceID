@@ -167,31 +167,45 @@ export default function Kiosk() {
       </header>
 
       {/* Main area: stretches between header and footer.
-          Stack at <lg (phones, small tablets in portrait), side-by-side at ≥lg. */}
+          - idle           → single full-width column, IdlePrompt centered.
+          - everything else → two-column grid (camera left, scene right) on ≥lg,
+                              stacked on narrower viewports. */}
       <div
-        className="relative z-10 flex-1 min-h-0 grid gap-4 sm:gap-6 lg:gap-8
-                   px-4 sm:px-6 lg:px-10
-                   grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,1fr)]
-                   grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-rows-1"
+        className={
+          "relative z-10 flex-1 min-h-0 gap-4 sm:gap-6 lg:gap-8 px-4 sm:px-6 lg:px-10 " +
+          (cameraActive
+            ? "grid grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,1fr)] " +
+              "grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-rows-1"
+            : "flex items-center justify-center")
+        }
       >
-        {/* Camera stage */}
-        <section className="relative min-h-0 flex items-center justify-center">
-          {cameraStatus === "denied" || cameraStatus === "error" ? (
-            <div className="w-full max-w-md flex flex-col items-center justify-center text-center gap-3 text-bek-darkTextMuted px-4">
-              <div className="text-display-sm sm:text-display-md text-bek-darkText">
-                Камера недоступна
+        {/* Camera stage — hidden entirely in idle so no <video> overlay icon
+            shows up on Android WebView and the IdlePrompt can claim the whole
+            screen for a focused first impression. */}
+        {cameraActive && (
+          <section className="relative min-h-0 flex items-center justify-center">
+            {cameraStatus === "denied" || cameraStatus === "error" ? (
+              <div className="w-full max-w-md flex flex-col items-center justify-center text-center gap-3 text-bek-darkTextMuted px-4">
+                <div className="text-display-sm sm:text-display-md text-bek-darkText">
+                  Камера недоступна
+                </div>
+                <p className="text-body-sm sm:text-body-md">
+                  {cameraError ?? "Разрешите доступ к камере и обновите страницу."}
+                </p>
               </div>
-              <p className="text-body-sm sm:text-body-md">
-                {cameraError ?? "Разрешите доступ к камере и обновите страницу."}
-              </p>
-            </div>
-          ) : (
-            <CameraStage videoRef={videoRef} active={cameraReady} caption={scanCaption} />
-          )}
-        </section>
+            ) : (
+              <CameraStage
+                videoRef={videoRef}
+                active={cameraReady}
+                mounted={cameraActive}
+                caption={scanCaption}
+              />
+            )}
+          </section>
+        )}
 
         {/* Scene panel */}
-        <section className="relative min-h-0 flex items-center justify-center">
+        <section className="relative min-h-0 flex items-center justify-center w-full">
           <AnimatePresence mode="wait">
             {state.name === "idle" && (
               <motion.div key="idle" exit={{ opacity: 0 }} transition={spring.calm} className="w-full">
