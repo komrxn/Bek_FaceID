@@ -131,6 +131,14 @@ export const employeeFormSchema = z.object({
 });
 export type EmployeeFormInput = z.infer<typeof employeeFormSchema>;
 
+export const photoMetaSchema = z.object({
+  embedding_id: z.number().int(),
+  photo_url: z.string(),
+  quality_score: z.number().nullable(),
+  is_primary: z.boolean(),
+});
+export type PhotoMeta = z.infer<typeof photoMetaSchema>;
+
 export const employeeListItemSchema = z.object({
   id: z.number().int(),
   full_name: z.string(),
@@ -140,6 +148,7 @@ export const employeeListItemSchema = z.object({
   photo_url: z.string().nullable(),
   is_active: z.boolean(),
   embeddings_count: z.number().int(),
+  photos: z.array(photoMetaSchema).default([]),
 });
 export type EmployeeListItem = z.infer<typeof employeeListItemSchema>;
 

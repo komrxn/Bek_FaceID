@@ -7,8 +7,10 @@ import { Input } from "@/components/ui/Input";
 import { Switch } from "@/components/ui/Switch";
 import { Card } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
+import { PhotoLightbox } from "@/components/app/PhotoLightbox";
 import { EmployeeForm } from "./EmployeeForm";
 import { api } from "@/lib/api";
+import { mediaUrl } from "@/lib/platform";
 import {
   employeeListSchema,
   employeeListItemSchema,
@@ -24,8 +26,13 @@ export default function Employees() {
   const [onlyActive, setOnlyActive] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<EmployeeListItem | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [deletingTarget, setDeletingTarget] = useState<EmployeeListItem | null>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const openPhoto = (url: string | null) => {
+    const abs = mediaUrl(url);
+    if (abs) setLightboxSrc(abs);
+  };
 
   const employees = useQuery({
     queryKey: ["employees", { onlyActive }],
@@ -84,12 +91,20 @@ export default function Employees() {
     },
   });
 
+  // Derive the editing employee from query data so the form always sees the
+  // latest photo list — e.g. after a photo is deleted, the query invalidates
+  // and `editing` re-resolves to the fresh row automatically.
+  const editing = useMemo<EmployeeListItem | null>(() => {
+    if (editingId === null || !employees.data) return null;
+    return employees.data.find((e) => e.id === editingId) ?? null;
+  }, [editingId, employees.data]);
+
   const openCreate = () => {
-    setEditing(null);
+    setEditingId(null);
     setFormOpen(true);
   };
   const openEdit = (emp: EmployeeListItem) => {
-    setEditing(emp);
+    setEditingId(emp.id);
     setFormOpen(true);
   };
 
@@ -173,11 +188,18 @@ export default function Employees() {
               <Card className={cn("p-4", !emp.is_active && "opacity-60")}>
                 <div className="flex items-center gap-3">
                   {emp.photo_url ? (
-                    <img
-                      src={emp.photo_url}
-                      alt=""
-                      className="h-12 w-12 object-cover mask-squircle ring-1 ring-bek-indigo/15 shrink-0"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => openPhoto(emp.photo_url)}
+                      className="shrink-0 rounded-[28%/32%] focus-visible:ring-2 focus-visible:ring-bek-indigo/40 focus-visible:ring-offset-2"
+                      aria-label={`Открыть фото ${emp.full_name}`}
+                    >
+                      <img
+                        src={mediaUrl(emp.photo_url) ?? ""}
+                        alt=""
+                        className="h-12 w-12 object-cover mask-squircle ring-1 ring-bek-indigo/15 cursor-zoom-in"
+                      />
+                    </button>
                   ) : (
                     <div className="h-12 w-12 mask-squircle bg-bek-surfaceIndigo text-bek-indigo flex items-center justify-center font-semibold shrink-0">
                       {emp.full_name[0]}
@@ -262,11 +284,18 @@ export default function Employees() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {emp.photo_url ? (
-                          <img
-                            src={emp.photo_url}
-                            alt=""
-                            className="h-10 w-10 object-cover mask-squircle ring-1 ring-bek-indigo/15"
-                          />
+                          <button
+                            type="button"
+                            onClick={() => openPhoto(emp.photo_url)}
+                            className="shrink-0 rounded-[28%/32%] focus-visible:ring-2 focus-visible:ring-bek-indigo/40 focus-visible:ring-offset-2"
+                            aria-label={`Открыть фото ${emp.full_name}`}
+                          >
+                            <img
+                              src={mediaUrl(emp.photo_url) ?? ""}
+                              alt=""
+                              className="h-10 w-10 object-cover mask-squircle ring-1 ring-bek-indigo/15 cursor-zoom-in"
+                            />
+                          </button>
                         ) : (
                           <div className="h-10 w-10 mask-squircle bg-bek-surfaceIndigo text-bek-indigo flex items-center justify-center font-semibold">
                             {emp.full_name[0]}
@@ -329,9 +358,15 @@ export default function Employees() {
         open={formOpen}
         onOpenChange={(o) => {
           setFormOpen(o);
-          if (!o) setEditing(null);
+          if (!o) setEditingId(null);
         }}
         employee={editing}
+      />
+
+      <PhotoLightbox
+        src={lightboxSrc}
+        onClose={() => setLightboxSrc(null)}
+        alt="Фото сотрудника"
       />
 
       {/* Delete confirm */}

@@ -54,9 +54,9 @@ PALETTE = {
 }
 
 DEPARTMENT_LABEL_RU = {
-    "hall": "Зал",
+    "hall": "Официанты",
     "kitchen": "Кухня",
-    "other": "Прочее",
+    "other": "Прочий штат",
 }
 
 THIN = Side(style="thin", color="E5E7EB")
@@ -262,6 +262,112 @@ def build_xlsx(
 
     for col, width in enumerate([32, 14, 24, 14, 18, 18], start=1):
         ws2.column_dimensions[get_column_letter(col)].width = width
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def build_daily_xlsx(
+    *,
+    employees: list[EmployeeForReport],
+    events_by_employee: dict[int, Iterable[MetricsEvent]],
+    day: date,
+    tz_name: str,
+    shift_day_cutoff_hour: int = 4,
+) -> bytes:
+    """Single-day report: one row per employee with came/went/hours/status.
+
+    Mirrors the admin dashboard's "Today" table so a manager can hand a
+    daily attendance snapshot to anyone who asks. Same tone coding as the
+    monthly grid for visual consistency.
+    """
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = f"Посещ {day.isoformat()}"
+    ws.freeze_panes = "A2"
+
+    headers = [
+        "Сотрудник",
+        "Отдел",
+        "Должность",
+        "Пришёл",
+        "Ушёл",
+        "Часов",
+        "Статус",
+    ]
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(row=1, column=i, value=h)
+        c.font = H_HEADER
+        c.fill = _fill(PALETTE["header_bg"])
+        c.alignment = Alignment(horizontal="center", vertical="center")
+
+    totals = {"working_now": 0, "completed": 0, "absent": 0}
+    for row_idx, emp in enumerate(employees, start=2):
+        events = list(events_by_employee.get(emp.id, []))
+        metrics = derive_day_metrics(
+            events,
+            tz_name=tz_name,
+            shift_day_cutoff_hour=shift_day_cutoff_hour,
+            target_day=day,
+        )
+        tone = _tone_for(metrics)
+        if metrics.is_present and metrics.went_at is None:
+            totals["working_now"] += 1
+            status = "На смене"
+        elif metrics.is_present:
+            totals["completed"] += 1
+            status = "Отработал"
+        else:
+            totals["absent"] += 1
+            status = "Не отметился"
+
+        ws.cell(row=row_idx, column=1, value=emp.full_name).font = H_NAME
+        ws.cell(
+            row=row_idx, column=2,
+            value=DEPARTMENT_LABEL_RU.get(emp.department, emp.department),
+        ).font = H_CELL
+        ws.cell(row=row_idx, column=3, value=emp.position).font = H_CELL
+        ws.cell(
+            row=row_idx, column=4,
+            value=metrics.came_at.strftime("%H:%M") if metrics.came_at else "—",
+        ).font = H_CELL
+        ws.cell(
+            row=row_idx, column=5,
+            value=metrics.went_at.strftime("%H:%M") if metrics.went_at else "—",
+        ).font = H_CELL
+        ws.cell(
+            row=row_idx, column=6,
+            value=round(metrics.worked_hours, 1) if metrics.worked_hours > 0 else "—",
+        ).font = H_CELL
+        sc = ws.cell(row=row_idx, column=7, value=status)
+        sc.font = H_CELL
+        sc.fill = _fill(PALETTE[f"fill_{tone}"])
+        sc.alignment = Alignment(horizontal="center", vertical="center")
+
+        for col in range(1, 8):
+            ws.cell(row=row_idx, column=col).border = BORDER
+            if col in (4, 5, 6):  # numeric/time cols centered
+                ws.cell(row=row_idx, column=col).alignment = Alignment(
+                    horizontal="center", vertical="center"
+                )
+
+    # Totals row
+    summary_row = len(employees) + 3
+    totals_label = (
+        f"Итого за день: на смене {totals['working_now']}, "
+        f"отработали {totals['completed']}, не отметились {totals['absent']}"
+    )
+    tc = ws.cell(row=summary_row, column=1, value=totals_label)
+    tc.font = H_NAME
+    ws.merge_cells(start_row=summary_row, start_column=1, end_row=summary_row, end_column=7)
+    tc.alignment = Alignment(horizontal="left", vertical="center")
+
+    for col, width in enumerate([32, 14, 24, 10, 10, 10, 18], start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    ws.row_dimensions[1].height = 24
 
     buf = BytesIO()
     wb.save(buf)

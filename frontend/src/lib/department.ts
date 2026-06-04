@@ -10,15 +10,15 @@ import type { Department } from "./zod";
 export const DEPARTMENT_VALUES = ["hall", "kitchen", "other"] as const satisfies readonly Department[];
 
 export const DEPARTMENT_LABEL: Record<Department, string> = {
-  hall: "Зал",
+  hall: "Официанты",
   kitchen: "Кухня",
-  other: "Прочее",
+  other: "Прочий штат",
 };
 
 export const DEPARTMENT_DESCRIPTION: Record<Department, string> = {
-  hall: "Официанты, бармены, хостес",
-  kitchen: "Повара, су-шефы, кондитеры",
-  other: "Управление, склад, прочее",
+  hall: "Зав. зала, официанты",
+  kitchen: "Штат поваров, уборка",
+  other: "Управление, бухгалтерия, склад",
 };
 
 /** Tailwind class for the small colored dot beside the label. */

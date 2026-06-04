@@ -16,8 +16,8 @@ import { useEffect, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { motion } from "framer-motion";
-import { CheckCircle2 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { CheckCircle2, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
@@ -30,7 +30,9 @@ import {
   DialogTitle,
 } from "@/components/ui/Dialog";
 import { PhotoDropzone } from "@/components/app/PhotoDropzone";
+import { PhotoLightbox } from "@/components/app/PhotoLightbox";
 import { ApiError, api } from "@/lib/api";
+import { mediaUrl } from "@/lib/platform";
 import {
   employeeCreatedSchema,
   employeeFormSchema,
@@ -38,6 +40,7 @@ import {
   type Department,
   type EmployeeFormInput,
   type EmployeeListItem,
+  type PhotoMeta,
 } from "@/lib/zod";
 import {
   DEPARTMENT_VALUES,
@@ -79,6 +82,36 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
   const [photos, setPhotos] = useState<File[]>([]);
   const [badIndices, setBadIndices] = useState<number[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const deletePhoto = useMutation({
+    mutationFn: async (p: PhotoMeta) =>
+      api({
+        method: "DELETE",
+        path: `/api/employees/${employee!.id}/photos/${p.embedding_id}`,
+        schema: employeeListItemSchema,
+      }),
+    onSuccess: () => {
+      // Refresh both the list (so this dialog re-renders with the trimmed
+      // photos array) and any attendance views that show the primary avatar.
+      qc.invalidateQueries({ queryKey: ["employees"] });
+      qc.invalidateQueries({ queryKey: ["attendance"] });
+      setDeleteError(null);
+    },
+    onError: (err) => {
+      if (err instanceof ApiError) {
+        const body = err.body as { detail?: { msg?: string } | string } | undefined;
+        const msg =
+          typeof body?.detail === "string"
+            ? body.detail
+            : body?.detail?.msg ?? err.message;
+        setDeleteError(msg);
+        return;
+      }
+      setDeleteError("Не удалось удалить фото.");
+    },
+  });
 
   const {
     register,
@@ -262,22 +295,88 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
             />
           </div>
 
-          {/* Photos */}
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-baseline justify-between gap-3">
-              <Label>{isEdit ? "Добавить ещё фото" : "Фотографии лица"}</Label>
-              {isEdit && employee?.photo_url && photos.length === 0 && (
-                <div className="flex items-center gap-2 text-body-sm text-bek-textMuted">
-                  <span>Сейчас:</span>
-                  <img
-                    src={employee.photo_url}
-                    alt=""
-                    className="h-6 w-6 mask-squircle object-cover ring-1 ring-bek-indigo/15"
-                  />
-                  <span className="font-medium">{employee.embeddings_count} шт.</span>
-                </div>
+          {/* Existing-photos gallery — edit mode only */}
+          {isEdit && employee && employee.photos.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <Label>Загруженные фотографии</Label>
+                <span className="text-body-sm text-bek-textMuted">
+                  {employee.embeddings_count} шт.
+                </span>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                <AnimatePresence initial={false}>
+                  {employee.photos.map((p) => {
+                    const absUrl = mediaUrl(p.photo_url) ?? "";
+                    const isOnlyPhoto = employee.photos.length === 1;
+                    return (
+                      <motion.div
+                        key={p.embedding_id}
+                        layout
+                        initial={{ opacity: 0, scale: 0.92 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.92 }}
+                        transition={spring.calm}
+                        className="relative group aspect-square"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setLightboxSrc(absUrl)}
+                          className="absolute inset-0 rounded-xl overflow-hidden ring-1 ring-bek-border focus-visible:ring-2 focus-visible:ring-bek-indigo/40 focus-visible:ring-offset-2"
+                          aria-label="Открыть фото"
+                        >
+                          <img
+                            src={absUrl}
+                            alt=""
+                            className="w-full h-full object-cover cursor-zoom-in"
+                          />
+                        </button>
+                        {p.is_primary && (
+                          <div
+                            className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-bek-indigo text-white text-[10px] font-semibold uppercase tracking-wider shadow"
+                            title="Основное фото — отображается на табло"
+                          >
+                            <Star className="h-2.5 w-2.5" strokeWidth={2.5} fill="white" />
+                            Главное
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => deletePhoto.mutate(p)}
+                          disabled={isOnlyPhoto || deletePhoto.isPending}
+                          title={
+                            isOnlyPhoto
+                              ? "Сначала добавьте новое фото — нельзя оставить сотрудника без фото"
+                              : "Удалить фото"
+                          }
+                          className={cn(
+                            "absolute top-1.5 right-1.5 h-7 w-7 rounded-full bg-black/55 backdrop-blur text-white",
+                            "flex items-center justify-center opacity-0 group-hover:opacity-100",
+                            "focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-white",
+                            "hover:bg-bek-red transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-black/55"
+                          )}
+                          aria-label="Удалить фото"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                        </button>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+              </div>
+              {deleteError && (
+                <p className="text-body-sm text-bek-red">{deleteError}</p>
               )}
+              <p className="text-body-sm text-bek-textMuted">
+                Удалите некачественное фото и добавьте новое ниже.
+                Должно остаться хотя бы одно фото.
+              </p>
             </div>
+          )}
+
+          {/* New photos */}
+          <div className="flex flex-col gap-1.5">
+            <Label>{isEdit ? "Добавить ещё фото" : "Фотографии лица"}</Label>
             <PhotoDropzone files={photos} onChange={setPhotos} disabled={isSubmitting} />
             {isEdit && photos.length === 0 && (
               <p className="text-body-sm text-bek-textMuted">
@@ -319,6 +418,12 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <PhotoLightbox
+        src={lightboxSrc}
+        onClose={() => setLightboxSrc(null)}
+        alt={`Фото ${employee?.full_name ?? "сотрудника"}`}
+      />
     </Dialog>
   );
 }

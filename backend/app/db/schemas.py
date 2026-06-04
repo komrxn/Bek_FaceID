@@ -45,8 +45,22 @@ class EmployeePublic(BaseModel):
 DEPARTMENT_PATTERN = r"^(hall|kitchen|other)$"
 
 
+class PhotoMeta(BaseModel):
+    """One enrolled reference photo + its embedding row id."""
+
+    embedding_id: int
+    photo_url: str
+    quality_score: float | None
+    is_primary: bool
+
+
 class EmployeeListItem(BaseModel):
-    """Row in the admin employees table."""
+    """Row in the admin employees table.
+
+    `photos` is included on every list response — the cost is small
+    (≈80 staff × 2 photos × 100B = 16 KB) and lets the edit form render
+    the photo gallery without a second round-trip.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -58,6 +72,7 @@ class EmployeeListItem(BaseModel):
     photo_url: str | None
     is_active: bool
     embeddings_count: int
+    photos: list[PhotoMeta] = Field(default_factory=list)
 
 
 class EmployeeUpdate(BaseModel):

@@ -97,3 +97,21 @@ class PhotoStorage:
             for f in d.iterdir():
                 f.unlink(missing_ok=True)
             d.rmdir()
+
+    def delete_file(self, rel_path: str) -> None:
+        """Delete a single photo by its DB-stored relative path.
+
+        Used when removing one of an employee's reference photos without
+        wiping the whole directory. Tolerates a missing file — the DB row
+        is the source of truth.
+        """
+        if not rel_path:
+            return
+        abs_path = self.root / rel_path
+        # Hard guard against path traversal — `rel_path` comes from the DB
+        # (already constrained to `<emp_id>/<uuid>.jpg`), but be paranoid.
+        try:
+            abs_path.relative_to(self.root)
+        except ValueError:
+            return
+        abs_path.unlink(missing_ok=True)

@@ -10,10 +10,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time as dtime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -138,18 +138,30 @@ async def mark(
 # ---------------------------- admin endpoints ----------------------------
 
 
-async def _today_shift_window_utc(settings: Settings) -> tuple[datetime, datetime]:
-    """Compute the UTC time range that corresponds to "today's shift day"."""
+def _shift_window_utc(
+    settings: Settings, shift_day: date
+) -> tuple[datetime, datetime]:
+    """UTC half-open window `[start, end)` for the given local shift day.
+
+    A "shift day" runs from `cutoff:00` on the named date to `cutoff:00`
+    the next morning — so a kitchen shift that ends at 03:00 still counts
+    toward the same day as the cook's check-in.
+    """
     tz = ZoneInfo(settings.restaurant_tz)
-    now_local = datetime.now(tz)
-    today_local = shift_day_for(now_local.replace(tzinfo=None), settings.shift_day_cutoff_hour)
     cutoff = settings.shift_day_cutoff_hour
-    # Shift day starts at cutoff:00 local on today, ends at cutoff:00 the next day.
-    start_local = datetime.combine(today_local, dtime(cutoff))
+    start_local = datetime.combine(shift_day, dtime(cutoff))
     end_local = start_local + timedelta(days=1)
     start_utc = start_local.replace(tzinfo=tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     end_utc = end_local.replace(tzinfo=tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     return start_utc, end_utc
+
+
+def _current_shift_day(settings: Settings) -> date:
+    tz = ZoneInfo(settings.restaurant_tz)
+    now_local = datetime.now(tz)
+    return shift_day_for(
+        now_local.replace(tzinfo=None), settings.shift_day_cutoff_hour
+    )
 
 
 @router.get(
@@ -160,8 +172,27 @@ async def _today_shift_window_utc(settings: Settings) -> tuple[datetime, datetim
 async def today(
     session: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    shift_day: str | None = Query(
+        None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description=(
+            "Shift day in RESTAURANT_TZ-local YYYY-MM-DD. Defaults to today's shift day "
+            "(the dashboard auto-refresh uses this default; navigating dates passes an explicit value)."
+        ),
+    ),
 ) -> AttendanceTodayResponse:
-    start_utc, end_utc = await _today_shift_window_utc(settings)
+    if shift_day is None:
+        target_day = _current_shift_day(settings)
+    else:
+        try:
+            target_day = date.fromisoformat(shift_day)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"shift_day: {exc}",
+            ) from exc
+
+    start_utc, end_utc = _shift_window_utc(settings, target_day)
     employees = await crud.list_employees(session, only_active=True)
     events_res = await session.execute(
         select(AttendanceEvent)
@@ -220,11 +251,8 @@ async def today(
         return (2, r.full_name.lower())
 
     rows.sort(key=_sort_key)
-    today_local_date = (
-        datetime.now(ZoneInfo(settings.restaurant_tz))
-    ).date()
     return AttendanceTodayResponse(
-        shift_day=today_local_date.isoformat(),
+        shift_day=target_day.isoformat(),
         rows=rows,
         totals=totals,
     )

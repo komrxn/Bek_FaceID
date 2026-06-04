@@ -39,7 +39,7 @@ from app.core.face_engine import FaceEngine, embedding_to_blob
 from app.core.photo_storage import PhotoStorage, decode_image_with_exif
 from app.db import crud
 from app.db.models import AttendanceEvent, Employee
-from app.db.schemas import EmployeeCreated, EmployeeListItem, EmployeeUpdate
+from app.db.schemas import EmployeeCreated, EmployeeListItem, EmployeeUpdate, PhotoMeta
 from app.deps import get_db, get_face_engine, get_photo_storage
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,21 @@ def _photo_url(photo_path: str | None) -> str | None:
 
 
 def _to_list_item(emp: Employee) -> EmployeeListItem:
+    photos: list[PhotoMeta] = []
+    for emb in emp.embeddings:
+        photo_url = _photo_url(emb.source_photo_path)
+        if photo_url is None:
+            continue
+        photos.append(
+            PhotoMeta(
+                embedding_id=emb.id,
+                photo_url=photo_url,
+                quality_score=emb.quality_score,
+                is_primary=(emb.source_photo_path == emp.photo_path),
+            )
+        )
+    # Primary first, then by id desc (newest extras up top).
+    photos.sort(key=lambda p: (not p.is_primary, -p.embedding_id))
     return EmployeeListItem(
         id=emp.id,
         full_name=emp.full_name,
@@ -67,6 +82,7 @@ def _to_list_item(emp: Employee) -> EmployeeListItem:
         photo_url=_photo_url(emp.photo_path),
         is_active=bool(emp.is_active),
         embeddings_count=len(emp.embeddings),
+        photos=photos,
     )
 
 
@@ -424,6 +440,82 @@ async def add_photos_endpoint(
         len(raw_photos),
         emp.id,
         engine.size,
+    )
+    return _to_list_item(emp)
+
+
+@router.delete(
+    "/{employee_id}/photos/{embedding_id}",
+    response_model=EmployeeListItem,
+)
+async def delete_photo_endpoint(
+    employee_id: Annotated[int, Path(gt=0)],
+    embedding_id: Annotated[int, Path(gt=0)],
+    session: AsyncSession = Depends(get_db),
+    engine: FaceEngine = Depends(get_face_engine),
+    storage: PhotoStorage = Depends(get_photo_storage),
+) -> EmployeeListItem:
+    """Remove a single reference photo + its embedding.
+
+    Refuses when this is the LAST photo — an enrolled employee with zero
+    embeddings is useless for recognition. Manager can either upload a
+    replacement first, or hard-delete the whole employee.
+
+    If the removed photo was the `photo_path` primary, promote another
+    embedding's source as the new primary so the avatar doesn't go blank.
+    """
+    emp = await crud.get_employee(session, employee_id)
+    if emp is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+
+    target = next((e for e in emp.embeddings if e.id == embedding_id), None)
+    if target is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Photo not found on this employee.",
+        )
+    if len(emp.embeddings) <= 1:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "msg": (
+                    "Это последнее фото сотрудника — добавьте новое прежде чем удалить старое, "
+                    "или удалите сотрудника целиком."
+                ),
+            },
+        )
+
+    was_primary = target.source_photo_path == emp.photo_path
+    photo_path_to_delete = target.source_photo_path
+
+    await session.delete(target)
+    await session.flush()
+    await session.refresh(emp)
+
+    if was_primary:
+        # Promote another embedding's source as the new primary so the
+        # employee card never goes photo-less.
+        replacement = next(iter(emp.embeddings), None)
+        emp.photo_path = replacement.source_photo_path if replacement else None
+
+    await session.commit()
+    await session.refresh(emp)
+
+    # Best-effort: drop the file off disk. The DB / FAISS rebuild already
+    # succeeded; a missing file just costs ~50 KB on disk.
+    try:
+        storage.delete_file(photo_path_to_delete)
+    except Exception as exc:  # pragma: no cover
+        logger.warning(
+            "[employees] delete photo file failed: %s (%s)",
+            photo_path_to_delete, exc,
+        )
+
+    await _rebuild_index_from_db(session, engine)
+
+    logger.info(
+        "[employees] deleted photo emb_id=%s emp_id=%s (was_primary=%s, remaining=%d)",
+        embedding_id, employee_id, was_primary, len(emp.embeddings),
     )
     return _to_list_item(emp)
 

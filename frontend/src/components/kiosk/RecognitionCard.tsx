@@ -20,7 +20,12 @@ export function RecognitionCard({
   onCame,
   onWent,
 }: Props) {
-  const cameSuggested = !lastEventToday || lastEventToday.event_type === "went";
+  // V1.3: show ONE button at a time. If the employee hasn't checked in yet
+  // today (or already checked out and isn't allowed to "Ушёл" twice), only
+  // "Пришёл" is offered. Once they've come in, only "Ушёл" is offered.
+  // This prevents the entire "tap Ушёл before tap Пришёл" failure mode.
+  const showCame = !lastEventToday || lastEventToday.event_type === "went";
+  const showWent = !!lastEventToday && lastEventToday.event_type === "came";
 
   return (
     <motion.div
@@ -75,33 +80,38 @@ export function RecognitionCard({
         )}
       </motion.div>
 
-      {/* Action buttons — grid 2 cols on tablet+, stack on narrow phones. */}
+      {/* Action button — only one at a time. The other state would be
+          either a duplicate or backwards. */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ ...spring.calm, delay: 0.16 }}
-        className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4 lg:gap-5 w-full"
+        className="w-full"
       >
-        <ActionButton
-          variant="came"
-          onClick={onCame}
-          disabled={!!awaitingType}
-          loading={awaitingType === "came"}
-          suggested={cameSuggested}
-        >
-          <LogIn className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 shrink-0" strokeWidth={1.75} />
-          <span>Пришёл</span>
-        </ActionButton>
-        <ActionButton
-          variant="went"
-          onClick={onWent}
-          disabled={!!awaitingType}
-          loading={awaitingType === "went"}
-          suggested={!cameSuggested}
-        >
-          <LogOut className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 shrink-0" strokeWidth={1.75} />
-          <span>Ушёл</span>
-        </ActionButton>
+        {showCame && (
+          <ActionButton
+            variant="came"
+            onClick={onCame}
+            disabled={!!awaitingType}
+            loading={awaitingType === "came"}
+            suggested
+          >
+            <LogIn className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 shrink-0" strokeWidth={1.75} />
+            <span>Пришёл</span>
+          </ActionButton>
+        )}
+        {showWent && (
+          <ActionButton
+            variant="went"
+            onClick={onWent}
+            disabled={!!awaitingType}
+            loading={awaitingType === "went"}
+            suggested
+          >
+            <LogOut className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7 shrink-0" strokeWidth={1.75} />
+            <span>Ушёл</span>
+          </ActionButton>
+        )}
       </motion.div>
     </motion.div>
   );

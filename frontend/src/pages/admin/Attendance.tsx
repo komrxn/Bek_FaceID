@@ -1,12 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Activity, CheckCircle2, MoonStar, Users2 } from "lucide-react";
+import { Activity, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, MoonStar, Users2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { DayStatusPill } from "@/components/app/DayStatusPill";
+import { PhotoLightbox } from "@/components/app/PhotoLightbox";
 import { StatsTile } from "@/components/app/StatsTile";
 import { api } from "@/lib/api";
+import { mediaUrl } from "@/lib/platform";
 import { attendanceTodayResponseSchema, type AttendanceTodayRow, type Department } from "@/lib/zod";
 import { DEPARTMENT_LABEL, DEPARTMENT_DOT } from "@/lib/department";
 import { formatDate, formatTime } from "@/lib/intl";
@@ -26,18 +29,42 @@ function parseFilter(raw: string | null): DeptFilter {
   return raw === "hall" || raw === "kitchen" || raw === "other" ? raw : "all";
 }
 
+function todayISO(): string {
+  // RESTAURANT_TZ is Asia/Tashkent in production; for the picker default
+  // we use the user's local date, which is good enough — admin will only
+  // ever browse historical dates, never the future.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function isoAddDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
 export default function Attendance() {
   const [params, setParams] = useSearchParams();
   const filter = parseFilter(params.get("dept"));
+  const dayParam = params.get("day");
+  const day = dayParam && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : todayISO();
+  const isToday = day === todayISO();
+
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const q = useQuery({
-    queryKey: ["attendance", "today"],
+    queryKey: ["attendance", "today", day],
     queryFn: () =>
-      api({ path: "/api/attendance/today", schema: attendanceTodayResponseSchema }),
-    refetchInterval: 15_000,
+      api({
+        path: `/api/attendance/today?shift_day=${day}`,
+        schema: attendanceTodayResponseSchema,
+      }),
+    // Only auto-poll when the user is on today's view. Historical days are
+    // immutable from the dashboard's POV, no point hammering the backend.
+    refetchInterval: isToday ? 15_000 : false,
   });
 
-  const totals = q.data?.totals;
   const dateLabel = useMemo(
     () => (q.data ? formatDate(q.data.shift_day) : ""),
     [q.data]
@@ -49,42 +76,108 @@ export default function Attendance() {
     return q.data.rows.filter((r) => r.department === filter);
   }, [q.data, filter]);
 
+  // Tiles match the active filter: when "Кухня" is selected, the counts
+  // reflect kitchen-only headcount. Computed client-side from visible rows.
+  const filteredTotals = useMemo(() => {
+    const acc = { working_now: 0, completed: 0, absent: 0 };
+    for (const r of visibleRows) {
+      if (r.is_present && !r.went_at) acc.working_now += 1;
+      else if (r.is_present) acc.completed += 1;
+      else acc.absent += 1;
+    }
+    return acc;
+  }, [visibleRows]);
+
   const setFilter = (next: DeptFilter) => {
     const nextParams = new URLSearchParams(params);
-    if (next === "all") {
-      nextParams.delete("dept");
-    } else {
-      nextParams.set("dept", next);
-    }
+    if (next === "all") nextParams.delete("dept");
+    else nextParams.set("dept", next);
     setParams(nextParams, { replace: true });
+  };
+
+  const setDay = (next: string) => {
+    const nextParams = new URLSearchParams(params);
+    if (next === todayISO()) nextParams.delete("day");
+    else nextParams.set("day", next);
+    setParams(nextParams, { replace: true });
+  };
+
+  const openPhoto = (url: string | null) => {
+    const abs = mediaUrl(url);
+    if (abs) setLightboxSrc(abs);
   };
 
   return (
     <div className="flex flex-col gap-5 sm:gap-6">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="text-display-md sm:text-display-lg tracking-tight">Посещаемость</h1>
-          <p className="text-body-md text-bek-textMuted capitalize">Смена дня · {dateLabel}</p>
+          <p className="text-body-md text-bek-textMuted capitalize">
+            Смена дня · {dateLabel}{isToday && " (сегодня)"}
+          </p>
+        </div>
+
+        {/* Day navigator */}
+        <div className="flex items-center gap-2 self-start sm:self-end">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setDay(isoAddDays(day, -1))}
+            aria-label="Предыдущий день"
+            className="h-10 w-10"
+          >
+            <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+          </Button>
+          <label className="relative">
+            <span className="sr-only">Выберите день</span>
+            <input
+              type="date"
+              value={day}
+              max={todayISO()}
+              onChange={(e) => setDay(e.target.value)}
+              className="h-10 rounded-xl border border-bek-border bg-bek-surface px-3 pr-9 text-body-md text-bek-text font-medium focus:outline-none focus:ring-2 focus:ring-bek-indigo/40 focus:border-bek-indigo"
+            />
+            <CalendarDays className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-bek-textFaint pointer-events-none" strokeWidth={1.75} />
+          </label>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setDay(isoAddDays(day, 1))}
+            disabled={isToday}
+            aria-label="Следующий день"
+            className="h-10 w-10"
+          >
+            <ChevronRight className="h-4 w-4" strokeWidth={2} />
+          </Button>
+          {!isToday && (
+            <Button
+              variant="outline"
+              onClick={() => setDay(todayISO())}
+              className="h-10"
+            >
+              Сегодня
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Stats tiles — 3 honest states */}
+      {/* Stats tiles — reflect the active department filter */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <StatsTile
-          label="Работают сейчас"
-          value={totals?.working_now ?? "—"}
+          label={filter === "all" ? "Работают сейчас" : `На смене · ${FILTER_LABEL[filter]}`}
+          value={q.data ? filteredTotals.working_now : "—"}
           tone="green"
           icon={<Activity className="h-5 w-5" strokeWidth={1.75} />}
         />
         <StatsTile
-          label="Отработали"
-          value={totals?.completed ?? "—"}
+          label={filter === "all" ? "Отработали" : `Отработали · ${FILTER_LABEL[filter]}`}
+          value={q.data ? filteredTotals.completed : "—"}
           tone="indigo"
           icon={<CheckCircle2 className="h-5 w-5" strokeWidth={1.75} />}
         />
         <StatsTile
-          label="Не отметились"
-          value={totals?.absent ?? "—"}
+          label={filter === "all" ? "Не отметились" : `Не отметились · ${FILTER_LABEL[filter]}`}
+          value={q.data ? filteredTotals.absent : "—"}
           tone="neutral"
           icon={<MoonStar className="h-5 w-5" strokeWidth={1.75} />}
         />
@@ -144,7 +237,12 @@ export default function Attendance() {
       {q.isSuccess && visibleRows.length > 0 && (
         <div className="md:hidden flex flex-col gap-3">
           {visibleRows.map((r, idx) => (
-            <MobileAttendanceCard key={r.employee_id} row={r} index={idx} />
+            <MobileAttendanceCard
+              key={r.employee_id}
+              row={r}
+              index={idx}
+              onPhotoClick={() => openPhoto(r.photo_url)}
+            />
           ))}
         </div>
       )}
@@ -176,13 +274,20 @@ export default function Attendance() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {r.photo_url ? (
-                          <img
-                            src={r.photo_url}
-                            alt=""
-                            className="h-9 w-9 object-cover mask-squircle ring-1 ring-bek-indigo/15"
-                          />
+                          <button
+                            type="button"
+                            onClick={() => openPhoto(r.photo_url)}
+                            className="shrink-0 rounded-[28%/32%] focus-visible:ring-2 focus-visible:ring-bek-indigo/40 focus-visible:ring-offset-2"
+                            aria-label={`Открыть фото ${r.full_name}`}
+                          >
+                            <img
+                              src={mediaUrl(r.photo_url) ?? ""}
+                              alt=""
+                              className="h-9 w-9 object-cover mask-squircle ring-1 ring-bek-indigo/15 cursor-zoom-in"
+                            />
+                          </button>
                         ) : (
-                          <div className="h-9 w-9 mask-squircle bg-bek-surfaceIndigo text-bek-indigo flex items-center justify-center font-semibold">
+                          <div className="h-9 w-9 mask-squircle bg-bek-surfaceIndigo text-bek-indigo flex items-center justify-center font-semibold shrink-0">
                             {r.full_name[0]}
                           </div>
                         )}
@@ -217,11 +322,21 @@ export default function Attendance() {
           </div>
         </Card>
       )}
+
+      <PhotoLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} alt="Фото сотрудника" />
     </div>
   );
 }
 
-function MobileAttendanceCard({ row: r, index }: { row: AttendanceTodayRow; index: number }) {
+function MobileAttendanceCard({
+  row: r,
+  index,
+  onPhotoClick,
+}: {
+  row: AttendanceTodayRow;
+  index: number;
+  onPhotoClick: () => void;
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
@@ -231,11 +346,18 @@ function MobileAttendanceCard({ row: r, index }: { row: AttendanceTodayRow; inde
       <Card className={cn("p-4", !r.is_present && "opacity-70")}>
         <div className="flex items-start gap-3">
           {r.photo_url ? (
-            <img
-              src={r.photo_url}
-              alt=""
-              className="h-12 w-12 object-cover mask-squircle ring-1 ring-bek-indigo/15 shrink-0"
-            />
+            <button
+              type="button"
+              onClick={onPhotoClick}
+              className="shrink-0 rounded-[28%/32%] focus-visible:ring-2 focus-visible:ring-bek-indigo/40 focus-visible:ring-offset-2"
+              aria-label={`Открыть фото ${r.full_name}`}
+            >
+              <img
+                src={mediaUrl(r.photo_url) ?? ""}
+                alt=""
+                className="h-12 w-12 object-cover mask-squircle ring-1 ring-bek-indigo/15 cursor-zoom-in"
+              />
+            </button>
           ) : (
             <div className="h-12 w-12 mask-squircle bg-bek-surfaceIndigo text-bek-indigo flex items-center justify-center font-semibold shrink-0">
               {r.full_name[0]}
