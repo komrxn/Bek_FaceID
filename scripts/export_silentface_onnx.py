@@ -78,6 +78,12 @@ def main() -> int:
         net.eval()
 
         dummy = __import__("torch").randn(1, 3, 80, 80, dtype=__import__("torch").float32)
+        # IMPORTANT: torch 2.x defaults to the dynamo exporter (which traces via
+        # torch.export). For older custom architectures like MiniFASNet that
+        # exporter produces NUMERICALLY INCORRECT graphs even when the export
+        # succeeds — observed empirically: real faces scored 0.017 (p_real),
+        # phone-photos scored same. dynamo=False forces the legacy TorchScript
+        # tracing path which roundtrips correctly. Don't switch back.
         __import__("torch").onnx.export(
             net,
             dummy,
@@ -86,8 +92,28 @@ def main() -> int:
             output_names=["output"],
             opset_version=13,
             dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
+            dynamo=False,
         )
         print(f"[export] {pth_name} → {out_path.relative_to(ROOT)}")
+
+        # Verify the round-trip: run the original torch model on the same input,
+        # then run the exported ONNX, and confirm the outputs match within a
+        # small tolerance. Catches "exported but wrong" failures at install
+        # time instead of at the kiosk.
+        import numpy as np
+        import onnxruntime as ort
+        torch_mod = __import__("torch")
+        with torch_mod.no_grad():
+            torch_out = net(dummy).cpu().numpy()
+        sess = ort.InferenceSession(str(out_path), providers=["CPUExecutionProvider"])
+        onnx_out = sess.run(None, {sess.get_inputs()[0].name: dummy.numpy()})[0]
+        max_diff = float(np.max(np.abs(torch_out - onnx_out)))
+        if max_diff > 1e-3:
+            sys.stderr.write(
+                f"  [verify] FAIL: torch vs onnx diverged by {max_diff:.4f} on {pth_name}\n"
+            )
+            return 5
+        print(f"  [verify] OK: max torch↔onnx diff = {max_diff:.6f}")
 
     return 0
 
