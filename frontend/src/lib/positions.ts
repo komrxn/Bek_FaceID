@@ -25,6 +25,7 @@ export const POSITIONS_BY_DEPARTMENT: Record<Department, readonly string[]> = {
     "Шашлык",
     "Пекарня",
     "Чайханщик",
+    "Другие повара",
     "Уборка",
     "посудомойка",
   ],
