@@ -48,7 +48,7 @@ import {
   DEPARTMENT_LABEL,
   DEPARTMENT_DESCRIPTION,
 } from "@/lib/department";
-import { positionsFor } from "@/lib/positions";
+import { positionsFor, splitPosition, composePosition } from "@/lib/positions";
 import { spring } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 
@@ -82,6 +82,8 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
   const isEdit = !!employee;
 
   const [photos, setPhotos] = useState<File[]>([]);
+  // True when the admin picked "Другое (вручную)" — free-text role entry.
+  const [manualMode, setManualMode] = useState(false);
   const [badIndices, setBadIndices] = useState<number[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -141,6 +143,9 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
       setPhotos([]);
       setBadIndices([]);
       setPhotoError(null);
+      // A loaded off-catalog role auto-renders as custom (base === "");
+      // explicit manual mode only matters for fresh "Другое" picks.
+      setManualMode(false);
     }
   }, [open, employee, reset]);
 
@@ -251,26 +256,67 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
               name="position"
               render={({ field }) => {
                 const opts = positionsFor(selectedDept);
-                // Legacy employees (pre-standardization) may hold an
-                // off-catalog role. Inject it as a selectable option so
-                // editing other fields never silently rewrites position.
-                const showCurrent = !!field.value && !opts.includes(field.value);
+                const { base, detail } = splitPosition(field.value);
+                // Custom = explicit "Другое" pick, or a loaded off-catalog
+                // role (non-empty value with no recognizable base).
+                const isCustom = manualMode || (!!field.value && base === "");
+                // A base from another department (legacy / dept just switched)
+                // is still offered so editing doesn't silently drop it.
+                const showForeignBase = !isCustom && !!base && !opts.includes(base);
                 return (
-                  <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-col gap-1.5 sm:col-span-2">
                     <Label htmlFor="position">Должность</Label>
-                    <Select id="position" {...field}>
-                      <option value="" disabled>
-                        Выберите должность…
-                      </option>
-                      {showCurrent && (
-                        <option value={field.value}>{field.value} (текущее)</option>
-                      )}
-                      {opts.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <Select
+                        id="position"
+                        value={isCustom ? "__custom__" : base}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "__custom__") {
+                            setManualMode(true);
+                            field.onChange("");
+                          } else {
+                            setManualMode(false);
+                            field.onChange(composePosition(v, detail));
+                          }
+                        }}
+                      >
+                        <option value="" disabled>
+                          Выберите должность…
                         </option>
-                      ))}
-                    </Select>
+                        {showForeignBase && (
+                          <option value={base}>{base} (другой отдел)</option>
+                        )}
+                        {opts.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                        <option value="__custom__">✏️ Другое (вручную)…</option>
+                      </Select>
+                      {isCustom ? (
+                        <Input
+                          placeholder="Например: Шеф-повар"
+                          value={field.value}
+                          onChange={(e) => field.onChange(e.target.value)}
+                        />
+                      ) : (
+                        <Input
+                          placeholder="Уточнение: старший / 2 / помощник"
+                          value={detail}
+                          disabled={!base}
+                          onChange={(e) =>
+                            field.onChange(
+                              base ? composePosition(base, e.target.value) : field.value
+                            )
+                          }
+                        />
+                      )}
+                    </div>
+                    <p className="text-body-sm text-bek-textMuted">
+                      Должность — из списка; рядом можно дописать уточнение
+                      (старший, номер, помощник) или выбрать «Другое» для своей.
+                    </p>
                     {errors.position && (
                       <p className="text-body-sm text-bek-red">{errors.position.message}</p>
                     )}
@@ -305,8 +351,10 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
                           aria-checked={selected}
                           onClick={() => {
                             field.onChange(dept satisfies Department);
-                            const cur = getValues("position");
-                            if (cur && !positionsFor(dept).includes(cur)) {
+                            // Clear a catalog role that doesn't belong to the
+                            // new department; leave custom roles untouched.
+                            const { base } = splitPosition(getValues("position"));
+                            if (base && !positionsFor(dept).includes(base)) {
                               setValue("position", "", { shouldDirty: true, shouldValidate: false });
                             }
                           }}

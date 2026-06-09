@@ -13,7 +13,7 @@ import { api } from "@/lib/api";
 import { mediaUrl } from "@/lib/platform";
 import { attendanceTodayResponseSchema, type AttendanceTodayRow, type Department } from "@/lib/zod";
 import { DEPARTMENT_LABEL, DEPARTMENT_DOT } from "@/lib/department";
-import { ALL_POSITIONS, positionsFor } from "@/lib/positions";
+import { ALL_POSITIONS, positionsFor, matchesPositionFilter } from "@/lib/positions";
 import { formatDate, formatTime } from "@/lib/intl";
 import { spring } from "@/lib/motion";
 import { cn } from "@/lib/cn";
@@ -91,7 +91,7 @@ export default function Attendance() {
     return q.data.rows.filter(
       (r) =>
         (filter === "all" || r.department === filter) &&
-        (posFilter === "all" || r.position === posFilter)
+        (posFilter === "all" || matchesPositionFilter(r.position, posFilter))
     );
   }, [q.data, filter, posFilter]);
 
