@@ -8,10 +8,12 @@ import { Button } from "@/components/ui/Button";
 import { DayStatusPill } from "@/components/app/DayStatusPill";
 import { PhotoLightbox } from "@/components/app/PhotoLightbox";
 import { StatsTile } from "@/components/app/StatsTile";
+import { Select } from "@/components/ui/Select";
 import { api } from "@/lib/api";
 import { mediaUrl } from "@/lib/platform";
 import { attendanceTodayResponseSchema, type AttendanceTodayRow, type Department } from "@/lib/zod";
 import { DEPARTMENT_LABEL, DEPARTMENT_DOT } from "@/lib/department";
+import { ALL_POSITIONS, positionsFor } from "@/lib/positions";
 import { formatDate, formatTime } from "@/lib/intl";
 import { spring } from "@/lib/motion";
 import { cn } from "@/lib/cn";
@@ -27,6 +29,16 @@ const FILTER_LABEL: Record<DeptFilter, string> = {
 
 function parseFilter(raw: string | null): DeptFilter {
   return raw === "hall" || raw === "kitchen" || raw === "other" ? raw : "all";
+}
+
+/** Roles offered by the position dropdown for the active department filter. */
+function positionsForFilter(dept: DeptFilter): readonly string[] {
+  return dept === "all" ? ALL_POSITIONS : positionsFor(dept);
+}
+
+/** A position filter is "all" unless it's a valid role for the active dept. */
+function parsePosition(raw: string | null, dept: DeptFilter): string {
+  return raw && positionsForFilter(dept).includes(raw) ? raw : "all";
 }
 
 function todayISO(): string {
@@ -47,6 +59,7 @@ function isoAddDays(iso: string, days: number): string {
 export default function Attendance() {
   const [params, setParams] = useSearchParams();
   const filter = parseFilter(params.get("dept"));
+  const posFilter = parsePosition(params.get("pos"), filter);
   const dayParam = params.get("day");
   const day = dayParam && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : todayISO();
   const isToday = day === todayISO();
@@ -70,28 +83,53 @@ export default function Attendance() {
     [q.data]
   );
 
-  const visibleRows = useMemo(() => {
+  // Rows matching the dept + position filters, but presence-agnostic — these
+  // feed the stat tiles, so the "Не отметились" counter stays accurate even
+  // though no-shows are hidden from the list below.
+  const filteredRows = useMemo(() => {
     if (!q.data) return [];
-    if (filter === "all") return q.data.rows;
-    return q.data.rows.filter((r) => r.department === filter);
-  }, [q.data, filter]);
+    return q.data.rows.filter(
+      (r) =>
+        (filter === "all" || r.department === filter) &&
+        (posFilter === "all" || r.position === posFilter)
+    );
+  }, [q.data, filter, posFilter]);
+
+  // What the table / cards actually render: only employees who showed up.
+  // No-shows are intentionally hidden from the list (they remain in the
+  // "Не отметились" tile count).
+  const displayRows = useMemo(
+    () => filteredRows.filter((r) => r.is_present),
+    [filteredRows]
+  );
 
   // Tiles match the active filter: when "Кухня" is selected, the counts
-  // reflect kitchen-only headcount. Computed client-side from visible rows.
+  // reflect kitchen-only headcount. Computed from filteredRows (all
+  // employees in scope), not displayRows (present-only).
   const filteredTotals = useMemo(() => {
     const acc = { working_now: 0, completed: 0, absent: 0 };
-    for (const r of visibleRows) {
+    for (const r of filteredRows) {
       if (r.is_present && !r.went_at) acc.working_now += 1;
       else if (r.is_present) acc.completed += 1;
       else acc.absent += 1;
     }
     return acc;
-  }, [visibleRows]);
+  }, [filteredRows]);
 
   const setFilter = (next: DeptFilter) => {
     const nextParams = new URLSearchParams(params);
     if (next === "all") nextParams.delete("dept");
     else nextParams.set("dept", next);
+    // A role from the old department rarely exists in the new one — drop it.
+    const pos = params.get("pos");
+    if (!pos || !positionsForFilter(next).includes(pos)) nextParams.delete("pos");
+    setParams(nextParams, { replace: true });
+  };
+
+  const setPosFilter = (next: string) => {
+    const nextParams = new URLSearchParams(params);
+    if (next === "all") nextParams.delete("pos");
+    else nextParams.set("pos", next);
     setParams(nextParams, { replace: true });
   };
 
@@ -183,7 +221,8 @@ export default function Attendance() {
         />
       </div>
 
-      {/* Department filter */}
+      {/* Filters: department tabs + position dropdown */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
       <div
         role="tablist"
         aria-label="Фильтр по отделу"
@@ -215,6 +254,28 @@ export default function Attendance() {
         })}
       </div>
 
+        {/* Position filter — scoped to the selected department */}
+        <div className="sm:w-56">
+          <label className="sr-only" htmlFor="pos-filter">
+            Фильтр по должности
+          </label>
+          <Select
+            id="pos-filter"
+            value={posFilter}
+            onChange={(e) => setPosFilter(e.target.value)}
+          >
+            <option value="all">
+              {filter === "all" ? "Все должности" : `Все · ${FILTER_LABEL[filter]}`}
+            </option>
+            {positionsForFilter(filter).map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
       {/* States */}
       {q.isLoading && (
         <Card className="p-10 text-center text-bek-textMuted">Загрузка…</Card>
@@ -224,19 +285,21 @@ export default function Attendance() {
           Не удалось загрузить таблицу.
         </Card>
       )}
-      {q.isSuccess && visibleRows.length === 0 && (
+      {q.isSuccess && displayRows.length === 0 && (
         <Card className="p-12 text-center text-bek-textMuted flex flex-col items-center gap-3">
           <Users2 className="h-7 w-7 text-bek-textFaint" strokeWidth={1.75} />
-          {filter === "all"
-            ? "В системе ещё нет сотрудников. Добавьте первого в разделе «Сотрудники»."
-            : "Никого нет в этом отделе."}
+          {filteredRows.length === 0
+            ? filter === "all" && posFilter === "all"
+              ? "В системе ещё нет сотрудников. Добавьте первого в разделе «Сотрудники»."
+              : "Нет сотрудников по выбранному фильтру."
+            : "Пока никто не отметился по выбранному фильтру."}
         </Card>
       )}
 
       {/* Mobile: cards */}
-      {q.isSuccess && visibleRows.length > 0 && (
+      {q.isSuccess && displayRows.length > 0 && (
         <div className="md:hidden flex flex-col gap-3">
-          {visibleRows.map((r, idx) => (
+          {displayRows.map((r, idx) => (
             <MobileAttendanceCard
               key={r.employee_id}
               row={r}
@@ -248,7 +311,7 @@ export default function Attendance() {
       )}
 
       {/* Desktop: table */}
-      {q.isSuccess && visibleRows.length > 0 && (
+      {q.isSuccess && displayRows.length > 0 && (
         <Card className="hidden md:block overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px]">
@@ -263,7 +326,7 @@ export default function Attendance() {
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map((r, idx) => (
+                {displayRows.map((r, idx) => (
                   <motion.tr
                     key={r.employee_id}
                     initial={{ opacity: 0, y: 4 }}

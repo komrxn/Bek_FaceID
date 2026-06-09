@@ -54,7 +54,7 @@ PALETTE = {
 }
 
 DEPARTMENT_LABEL_RU = {
-    "hall": "Официанты",
+    "hall": "Зал",
     "kitchen": "Кухня",
     "other": "Прочий штат",
 }

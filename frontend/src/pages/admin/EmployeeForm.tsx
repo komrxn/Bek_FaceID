@@ -20,6 +20,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { Label } from "@/components/ui/Label";
 import {
   Dialog,
@@ -47,6 +48,7 @@ import {
   DEPARTMENT_LABEL,
   DEPARTMENT_DESCRIPTION,
 } from "@/lib/department";
+import { positionsFor } from "@/lib/positions";
 import { spring } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 
@@ -118,11 +120,19 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
     handleSubmit,
     control,
     reset,
+    setValue,
+    getValues,
+    watch,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<EmployeeFormInput>({
     resolver: zodResolver(employeeFormSchema),
     defaultValues: defaultsFor(employee),
   });
+
+  // Position options track the selected department; switching department
+  // clears a now-invalid position so we never persist a role that doesn't
+  // belong to the chosen отдел.
+  const selectedDept = watch("department");
 
   // Re-seed defaults when switching between employees (or create→edit).
   useEffect(() => {
@@ -236,13 +246,38 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
               )}
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="position">Должность</Label>
-              <Input id="position" placeholder="Официант" {...register("position")} />
-              {errors.position && (
-                <p className="text-body-sm text-bek-red">{errors.position.message}</p>
-              )}
-            </div>
+            <Controller
+              control={control}
+              name="position"
+              render={({ field }) => {
+                const opts = positionsFor(selectedDept);
+                // Legacy employees (pre-standardization) may hold an
+                // off-catalog role. Inject it as a selectable option so
+                // editing other fields never silently rewrites position.
+                const showCurrent = !!field.value && !opts.includes(field.value);
+                return (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="position">Должность</Label>
+                    <Select id="position" {...field}>
+                      <option value="" disabled>
+                        Выберите должность…
+                      </option>
+                      {showCurrent && (
+                        <option value={field.value}>{field.value} (текущее)</option>
+                      )}
+                      {opts.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </Select>
+                    {errors.position && (
+                      <p className="text-body-sm text-bek-red">{errors.position.message}</p>
+                    )}
+                  </div>
+                );
+              }}
+            />
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="phone">Телефон</Label>
@@ -268,7 +303,13 @@ export function EmployeeForm({ open, onOpenChange, employee }: Props) {
                           type="button"
                           role="radio"
                           aria-checked={selected}
-                          onClick={() => field.onChange(dept satisfies Department)}
+                          onClick={() => {
+                            field.onChange(dept satisfies Department);
+                            const cur = getValues("position");
+                            if (cur && !positionsFor(dept).includes(cur)) {
+                              setValue("position", "", { shouldDirty: true, shouldValidate: false });
+                            }
+                          }}
                           className={cn(
                             "flex flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left transition-all",
                             "focus-visible:ring-2 focus-visible:ring-bek-indigo/40 focus-visible:ring-offset-2",
